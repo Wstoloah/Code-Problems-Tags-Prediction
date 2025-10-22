@@ -112,27 +112,29 @@ class FeatureExtractor:
         self.text_vectorizer.fit(texts)
         self.fitted = True
         
-    def transform(self, texts: List[str]) -> np.ndarray:
+    def transform(self, texts: List[str], use_stats_features=False) -> np.ndarray:
         """Transform text data to feature vectors"""
         if not self.fitted:
             raise ValueError("FeatureExtractor must be fitted before transform")
         
         # TF-IDF features
         tfidf_features = self.text_vectorizer.transform(texts)
+
+        if use_stats_features : 
+            # Statistical features
+            stat_features = self.extract_statistical_features(texts)
+            
+            # Combine all features
+            from scipy.sparse import hstack, csr_matrix
+            combined = hstack([tfidf_features, csr_matrix(stat_features)])
+            return combined
         
-        # Statistical features
-        stat_features = self.extract_statistical_features(texts)
-        
-        # Combine all features
-        from scipy.sparse import hstack, csr_matrix
-        combined = hstack([tfidf_features, csr_matrix(stat_features)])
-        
-        return combined
+        return tfidf_features
     
-    def fit_transform(self, texts: List[str]) -> np.ndarray:
+    def fit_transform(self, texts: List[str], use_stats_features=False) -> np.ndarray:
         """Fit and transform in one step"""
         self.fit(texts)
-        return self.transform(texts)
+        return self.transform(texts, use_stats_features)
 
 
 class BaselineTagPredictor:
@@ -171,7 +173,7 @@ class BaselineTagPredictor:
 
         return y, TARGET_TAGS
 
-    def train(self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None):
+    def train(self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None, use_stats_features=False):
         """Train the model"""
         print("==== Preparing data... ====")
         train_texts = train_df["text"].fillna("").tolist()
@@ -190,7 +192,7 @@ class BaselineTagPredictor:
                 print(f"  {tag:<20} {count:>5} ({count/len(train_df)*100:.1f}%)")
 
         print("\n==== Extracting features... ====")
-        X_train = self.feature_extractor.fit_transform(train_texts)
+        X_train = self.feature_extractor.fit_transform(train_texts, use_stats_features)
         print(f"==== Feature vector size: {X_train.shape[1]} ====")
 
         # use injected classifier or default LogisticRegression
@@ -218,17 +220,17 @@ class BaselineTagPredictor:
             print("\n==== Evaluation on validation set: ====")
             val_texts = val_df["text"].fillna("").tolist()
             y_val, _ = self.prepare_labels(val_df)
-            X_val = self.feature_extractor.transform(val_texts)
+            X_val = self.feature_extractor.transform(val_texts, use_stats_features)
             self.evaluate(X_val, y_val)
 
         return X_train, y_train
     
-    def predict(self, texts: List[str], threshold: float = 0.5) -> List[List[str]]:
+    def predict(self, texts: List[str], threshold: float = 0.5, use_stats_features=False) -> List[List[str]]:
         """Predict tags for new problems"""
         if self.classifier is None:
             raise ValueError("Model must be trained before prediction")
 
-        X = self.feature_extractor.transform(texts)
+        X = self.feature_extractor.transform(texts, use_stats_features)
         y_prob = self.classifier.predict_proba(X)
 
         predictions = []
@@ -241,11 +243,11 @@ class BaselineTagPredictor:
             predictions.append(pred_tags)
         return predictions
 
-    def predict_proba(self, texts: List[str]) -> np.ndarray:
+    def predict_proba(self, texts: List[str], use_stats_features=False) -> np.ndarray:
         if self.classifier is None:
             raise ValueError("Model must be trained before prediction")
 
-        X = self.feature_extractor.transform(texts)
+        X = self.feature_extractor.transform(texts, use_stats_features)
         return self.classifier.predict_proba(X)
 
     def evaluate(self, X, y_true, threshold: float = 0.5):
@@ -337,13 +339,15 @@ def cli():
     """Tag Predictor CLI for Codeforces Problems"""
     pass
 
+
 @cli.command()
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--classifier', type=click.Choice(list(CLASSIFIERS.keys())), default='logistic',
               help='Which classifier to use for training')
 @click.option('--model-path', default='models/baseline_model.pkl', help='Path to save the trained model')
 @click.option('--use-val', is_flag=True, help='Use validation set for evaluation during training')
-def train(data_root, classifier, model_path, use_val):
+@click.option('--use-stats-features', is_flag=True, help='Include statistical features in training')
+def train(data_root, classifier, model_path, use_val, use_stats_features):
     """Train the tag prediction model"""
     click.echo(f"==== Training Tag Predictor ({classifier}) ====\n")
 
@@ -357,35 +361,35 @@ def train(data_root, classifier, model_path, use_val):
     # Train model
     predictor = BaselineTagPredictor(classifier=clf)
     if use_val:
-        predictor.train(train_df, val_df=val_df)
+        predictor.train(train_df, val_df=val_df, use_stats_features=use_stats_features)
     else:
-        predictor.train(train_df)
+        predictor.train(train_df, use_stats_features=use_stats_features)
 
     # Save model
     predictor.save(model_path)
     click.echo(f"\n==== Training complete! Model saved to {model_path} ====")
 
+
 @cli.command()
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--model-path', default='models/baseline_model.pkl', help='Path to the trained model')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
+@click.option('--use-stats-features', is_flag=True, help='Use statistical features during prediction')
 @click.option('--output', default='predictions.json')
 @click.option('--threshold', default=0.5)
-def predict(data_root, model_path, split, output, threshold):
+def predict(data_root, model_path, split, use_stats_features, output, threshold):
     """Predict tags for problems in a dataset split"""
     click.echo(f"==== Predicting Tags on {split} set ====\n")
 
-    # Load model
     predictor = BaselineTagPredictor()
     predictor.load(model_path)
 
-    # Load data
     df = load_dataset_split(os.path.join(data_root, split))
     texts = df['text'].fillna("").tolist()
 
     click.echo(f"Making predictions on {len(df)} examples...")
     start = time.time()
-    predictions = predictor.predict(texts, threshold=threshold)
+    predictions = predictor.predict(texts, threshold=threshold, use_stats_features=use_stats_features)
     elapsed = time.time() - start
 
     # Save results
@@ -406,14 +410,16 @@ def predict(data_root, model_path, split, output, threshold):
     click.echo(f"===> Average prediction time: {elapsed/len(df)*1000:.2f} ms/sample")
     click.echo("\n==== Prediction complete! ====")
 
+
 @cli.command()
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--model-path', default='models/baseline_model.pkl')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
+@click.option('--use-stats-features', is_flag=True, help='Include statistical features')
 @click.option('--threshold', default=0.5)
 @click.option('--log-path', default='results.md', help='Path to the markdown results log')
 @click.option('--notes', default='', help='Optional notes for this experiment')
-def evaluate(data_root, model_path, split, threshold, log_path, notes):
+def evaluate(data_root, model_path, split, use_stats_features, threshold, log_path, notes):
     """Evaluate model on a dataset split"""
     click.echo(f"==== Evaluating on {split} set ====\n")
 
@@ -422,15 +428,15 @@ def evaluate(data_root, model_path, split, threshold, log_path, notes):
 
     df = load_dataset_split(os.path.join(data_root, split))
     texts = df['text'].fillna("").tolist()
-    X = predictor.feature_extractor.transform(texts)
+    X = predictor.feature_extractor.transform(texts, use_stats_features)
     y_true, _ = predictor.prepare_labels(df)
 
     click.echo(f"Evaluating {len(df)} examples...\n")
     metrics = predictor.evaluate(X, y_true, threshold=threshold)
 
-    # Log results in Markdown
+    # Log results
     classifier_name = type(predictor.classifier.estimator).__name__
-    embedding_name = getattr(predictor, "embedding_name", "TF-IDF")  # optional attribute
+    embedding_name = getattr(predictor, "embedding_name", "TF-IDF")
 
     logger = ExperimentLogger(log_path)
     logger.log_result(
@@ -445,11 +451,13 @@ def evaluate(data_root, model_path, split, threshold, log_path, notes):
     click.echo("\n==== Evaluation complete! ====")
     return metrics
 
+
 @cli.command()
 @click.argument('text', type=str)
 @click.option('--model-path', default='models/baseline_model.pkl')
+@click.option('--use-stats-features', is_flag=True, help='Include statistical features')
 @click.option('--threshold', default=0.5)
-def predict_one(text, model_path, threshold):
+def predict_one(text, model_path, use_stats_features, threshold):
     """Predict tags for a single problem description"""
     click.echo("==== Predicting tags for single problem ====\n")
 
@@ -457,11 +465,12 @@ def predict_one(text, model_path, threshold):
     predictor.load(model_path)
 
     start = time.time()
-    pred_tags = predictor.predict([text], threshold=threshold)[0]
+    pred_tags = predictor.predict([text], threshold=threshold, use_stats_features=use_stats_features)[0]
     elapsed = time.time() - start
 
     click.echo(f"Predicted tags: {pred_tags}")
     click.echo(f"Prediction time: {elapsed*1000:.2f} ms")
+
 
 if __name__ == '__main__':
     cli()
