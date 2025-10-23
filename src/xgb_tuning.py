@@ -46,27 +46,23 @@ Y_train = mlb.fit_transform(train_df["tags"])
 Y_val = mlb.transform(val_df["tags"])
 
 # Vectorizer
-if VECTOR_TYPE == "count":
-    vectorizer = CountVectorizer(max_features=20000, ngram_range=(1,3), stop_words="english", min_df=2, max_df=0.85)
-else:
-    vectorizer = TfidfVectorizer(max_features=20000, ngram_range=(1,3), stop_words="english", min_df=2, max_df=0.85)
+
+vectorizer = FeatureExtractor(vectorizer_type=VECTOR_TYPE, max_features_text=20000)
 
 X_train = vectorizer.fit_transform(train_texts)
 X_val = vectorizer.transform(val_texts)
 
 # Optional: add statistical features
-feature_extractor = FeatureExtractor(vectorizer_type=VECTOR_TYPE)
-feature_extractor.text_vectorizer = vectorizer  # reuse fitted vectorizer
 if USE_STATS_FEATURES:
-    stat_train = feature_extractor.extract_statistical_features(train_texts)
+    stat_train = vectorizer.extract_statistical_features(train_texts)
     from scipy.sparse import hstack, csr_matrix
     X_train = hstack([X_train, csr_matrix(stat_train)])
     
-    stat_val = feature_extractor.extract_statistical_features(val_texts)
+    stat_val = vectorizer.extract_statistical_features(val_texts)
     X_val = hstack([X_val, csr_matrix(stat_val)])
 
 
-# --- RandomizedSearchCV example ---
+# --- RandomizedSearchCV---
 param_grid = {
     "estimator__n_estimators": [300, 500, 800],
     "estimator__max_depth": [4, 6, 8, 10],
@@ -95,7 +91,7 @@ print(classification_report(Y_val, y_pred, target_names=TARGET_TAGS, digits=4))
 
 # --- Wrap into BaselineTagPredictor and save ---
 predictor = BaselineTagPredictor(target_tags=TARGET_TAGS, classifier=search.best_estimator_, vectorizer_type=VECTOR_TYPE)
-predictor.feature_extractor = feature_extractor  # keep vectorizer & stats
+predictor.feature_extractor = vectorizer # keep vectorizer & stats
 predictor.use_code = True  # if code concatenation is used
 
 os.makedirs(os.path.dirname(MODEL_OUT) or ".", exist_ok=True)
