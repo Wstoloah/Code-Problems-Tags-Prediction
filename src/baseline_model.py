@@ -17,7 +17,7 @@ warnings.filterwarnings('ignore')
 
 import numpy as np
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
@@ -28,111 +28,117 @@ from sklearn.metrics import (
 )
 import click
 
-# Target tags
+# Target tags (these are the ones we train/evaluate for)
 TARGET_TAGS = [
-    'math', 'graphs', 'strings', 'number theory', 
+    'math', 'graphs', 'strings', 'number theory',
     'trees', 'geometry', 'games', 'probabilities'
 ]
 
 class FeatureExtractor:
-    """Extract and combine features from problem descriptions and code"""
-    
-    def __init__(self, max_features_text=8000):
-        self.text_vectorizer = TfidfVectorizer(
-            max_features=max_features_text,
-            ngram_range=(1, 3),
-            stop_words='english',
-            min_df=2,
-            max_df=0.85,
-            sublinear_tf=True
-        )
+    """Text feature extractor using TF-IDF or CountVectorizer, optional statistical features."""
+
+    def __init__(self, vectorizer_type: str = "tfidf", max_features_text: int = 8000):
+        self.vectorizer_type = vectorizer_type.lower()
+        if self.vectorizer_type == "tfidf":
+            self.text_vectorizer = TfidfVectorizer(
+                max_features=max_features_text,
+                ngram_range=(1, 3),
+                stop_words='english',
+                min_df=2,
+                max_df=0.85,
+                sublinear_tf=True
+            )
+        elif self.vectorizer_type == "count":
+            self.text_vectorizer = CountVectorizer(
+                max_features=max_features_text,
+                ngram_range=(1, 3),
+                stop_words='english',
+                min_df=2,
+                max_df=0.85
+            )
+        else:
+            raise ValueError("vectorizer_type must be either 'tfidf' or 'count'")
+
         self.fitted = False
-        
+
     def extract_statistical_features(self, texts: List[str]) -> np.ndarray:
-        """Extract statistical features from combined text"""
+        """Statistical and heuristics features (works on combined text or on description/code)."""
         features = []
-        
         for text in texts:
             if not text or pd.isna(text):
                 text = ""
-            
             text_lower = text.lower()
-            
-            # Keywords indicating categories
+
             feature_dict = {
                 # Math indicators
-                'has_math_kw': int(any(kw in text_lower for kw in 
-                    ['prime', 'divisor', 'factorial', 'gcd', 'lcm', 'modulo', 'fibonacci'])),
-                'has_formula': int(any(kw in text_lower for kw in 
-                    ['formula', 'equation', 'calculate', 'sum', 'product'])),
-                
+                'has_math_kw': int(any(kw in text_lower for kw in
+                                      ['prime', 'divisor', 'factorial', 'gcd', 'lcm', 'modulo', 'fibonacci'])),
+                'has_formula': int(any(kw in text_lower for kw in
+                                       ['formula', 'equation', 'calculate', 'sum', 'product'])),
+
                 # Graph indicators
-                'has_graph_kw': int(any(kw in text_lower for kw in 
-                    ['graph', 'node', 'edge', 'vertex', 'tree', 'path', 'cycle'])),
-                'has_graph_algo': int(any(kw in text_lower for kw in 
-                    ['dfs', 'bfs', 'dijkstra', 'shortest path', 'spanning tree'])),
-                
+                'has_graph_kw': int(any(kw in text_lower for kw in
+                                        ['graph', 'node', 'edge', 'vertex', 'tree', 'path', 'cycle'])),
+                'has_graph_algo': int(any(kw in text_lower for kw in
+                                          ['dfs', 'bfs', 'dijkstra', 'shortest path', 'spanning tree'])),
+
                 # String indicators
-                'has_string_kw': int(any(kw in text_lower for kw in 
-                    ['string', 'substring', 'palindrome', 'character', 'word', 'text'])),
-                'has_string_algo': int(any(kw in text_lower for kw in 
-                    ['pattern', 'match', 'search', 'replace', 'concatenate'])),
-                
+                'has_string_kw': int(any(kw in text_lower for kw in
+                                         ['string', 'substring', 'palindrome', 'character', 'word', 'text'])),
+                'has_string_algo': int(any(kw in text_lower for kw in
+                                           ['pattern', 'match', 'search', 'replace', 'concatenate'])),
+
                 # Geometry indicators
-                'has_geometry_kw': int(any(kw in text_lower for kw in 
-                    ['point', 'line', 'circle', 'triangle', 'polygon', 'distance', 'angle', 'coordinate'])),
-                
+                'has_geometry_kw': int(any(kw in text_lower for kw in
+                                           ['point', 'line', 'circle', 'triangle', 'polygon', 'distance', 'angle',
+                                            'coordinate'])),
+
                 # Probability indicators
-                'has_prob_kw': int(any(kw in text_lower for kw in 
-                    ['probability', 'expected', 'random', 'chance', 'outcome'])),
-                
+                'has_prob_kw': int(any(kw in text_lower for kw in
+                                       ['probability', 'expected', 'random', 'chance', 'outcome'])),
+
                 # Game theory indicators
-                'has_game_kw': int(any(kw in text_lower for kw in 
-                    ['game', 'player', 'win', 'lose', 'strategy', 'turn', 'move'])),
-                
+                'has_game_kw': int(any(kw in text_lower for kw in
+                                       ['game', 'player', 'win', 'lose', 'strategy', 'turn', 'move'])),
+
                 # Code structure indicators
                 'has_loop': text.count('for') + text.count('while'),
                 'has_recursion': int('def' in text and any(
                     kw in text_lower for kw in ['recursive', 'recursion'])),
                 'has_sort': int('sort' in text_lower),
                 'num_functions': text.count('def '),
-                
+
                 # Text statistics
                 'text_length': len(text),
                 'num_numbers': sum(c.isdigit() for c in text),
                 'avg_word_length': np.mean([len(w) for w in text.split()]) if text.split() else 0,
             }
-            
             features.append(list(feature_dict.values()))
-        
+
         return np.array(features)
-    
+
     def fit(self, texts: List[str]):
-        """Fit vectorizers on training data"""
+        """Fit vectorizer on training texts."""
         self.text_vectorizer.fit(texts)
         self.fitted = True
-        
-    def transform(self, texts: List[str], use_stats_features=False) -> np.ndarray:
-        """Transform text data to feature vectors"""
+
+    def transform(self, texts: List[str], use_stats_features: bool = False):
+        """Transform texts to vectorized features (sparse matrix)."""
         if not self.fitted:
             raise ValueError("FeatureExtractor must be fitted before transform")
-        
-        # TF-IDF features
-        tfidf_features = self.text_vectorizer.transform(texts)
 
-        if use_stats_features : 
-            # Statistical features
+        X_text = self.text_vectorizer.transform(texts)
+
+        if use_stats_features:
             stat_features = self.extract_statistical_features(texts)
-            
-            # Combine all features
             from scipy.sparse import hstack, csr_matrix
-            combined = hstack([tfidf_features, csr_matrix(stat_features)])
+            combined = hstack([X_text, csr_matrix(stat_features)])
             return combined
-        
-        return tfidf_features
-    
-    def fit_transform(self, texts: List[str], use_stats_features=False) -> np.ndarray:
-        """Fit and transform in one step"""
+
+        return X_text
+
+    def fit_transform(self, texts: List[str], use_stats_features: bool = False):
+        """Fit and transform in one step."""
         self.fit(texts)
         return self.transform(texts, use_stats_features)
 
@@ -140,73 +146,92 @@ class FeatureExtractor:
 class BaselineTagPredictor:
     """Multi-label classifier for algorithm problem tags"""
 
-    def __init__(self, target_tags: Optional[List[str]] = None, classifier=None):
+    def __init__(self, target_tags: Optional[List[str]] = None,
+                 classifier=None, vectorizer_type: str = "tfidf", use_code: bool = False):
         """
         Args:
-            target_tags: Optional list of tag names.
-            classifier: Optional sklearn-style classifier (OneVsRestClassifier, etc.)
+            target_tags: list of tags to train/predict (columns order).
+            classifier: sklearn-style classifier (OneVsRestClassifier wrapper recommended).
+            vectorizer_type: 'tfidf' or 'count'.
+            use_code: whether code is included as part of text features.
         """
         self.TARGET_TAGS = target_tags or TARGET_TAGS
-        self.feature_extractor = FeatureExtractor()
-        self.classifier = classifier  # external classifier injection
-        self.all_tags = None
+        self.feature_extractor = FeatureExtractor(vectorizer_type=vectorizer_type)
+        self.embedding_name = vectorizer_type.upper() + (("+CODE") if use_code else "")
+        self.classifier = classifier
+        self.use_code = use_code
+        self.all_tags = None  # all tags seen in dataset (kept for EDA / future use)
         self.tag_to_idx = None
         self.idx_to_tag = None
 
+    # Labels: build binary matrix only for TARGET_TAGS
     def prepare_labels(self, df: pd.DataFrame) -> Tuple[np.ndarray, List[str]]:
-        """Convert tag lists to binary matrix"""
-        all_tags_set = set()
-        for tags in df["tags"]:
-            if isinstance(tags, list):
-                all_tags_set.update(tags)
-
-        self.all_tags = TARGET_TAGS
-        self.tag_to_idx = {tag: idx for idx, tag in enumerate(TARGET_TAGS)}
+        """
+        Build y matrix of shape (n_samples, len(TARGET_TAGS)).
+        df expected to have either 'filtered_tags' or 'tags' column (list).
+        We **do not** drop samples that lack target tags — we include them with all-zero labels.
+        """
+        self.all_tags = sorted({t for tags in df["tags"] for t in (tags or [])})
+        self.tag_to_idx = {tag: idx for idx, tag in enumerate(self.TARGET_TAGS)}
         self.idx_to_tag = {idx: tag for tag, idx in self.tag_to_idx.items()}
 
-        y = np.zeros((len(df), len(TARGET_TAGS)))
+        y = np.zeros((len(df), len(self.TARGET_TAGS)), dtype=int)
         for i, tags in enumerate(df["tags"]):
-            if isinstance(tags, list):
-                for tag in tags:
-                    if tag in self.tag_to_idx:
-                        y[i, self.tag_to_idx[tag]] = 1
+            if not isinstance(tags, list):
+                continue
+            for t in tags:
+                if t in self.tag_to_idx:
+                    y[i, self.tag_to_idx[t]] = 1
+        return y, self.TARGET_TAGS
 
-        return y, TARGET_TAGS
 
-    def train(self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None, use_stats_features=False):
-        """Train the model"""
+    # Helper to build text features (description +/- code)
+    def _build_texts_from_df(self, df: pd.DataFrame) -> List[str]:
+        """
+        Build the string list that will be passed to vectorizer.
+        Uses 'description' column and optionally 'code' column.
+        If df has a 'text' column already, prefer that for backward compatibility.
+        """
+        if "text" in df.columns:
+            return df["text"].fillna("").tolist()
+
+        descs = df["description"].fillna("").tolist() if "description" in df.columns else [""] * len(df)
+        if self.use_code and "code" in df.columns:
+            codes = df["code"].fillna("").tolist()
+            return [d.strip() + "\n\n" + c.strip() for d, c in zip(descs, codes)]
+        else:
+            return [d.strip() for d in descs]
+
+    def train(self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None,
+              use_stats_features: bool = False):
+        """Train the classifier on training DataFrame (keeps samples even if no TARGET_TAGS)."""
         print("==== Preparing data... ====")
-        train_texts = train_df["text"].fillna("").tolist()
+
+        # Build texts according to use_code flag
+        train_texts = self._build_texts_from_df(train_df)
         y_train, tags = self.prepare_labels(train_df)
 
-        print(f"===> Training set: {len(train_df)} examples, {len(tags)} tags")
-        print(f"===> Target tags: {len([t for t in self.TARGET_TAGS if t in tags])}/{len(self.TARGET_TAGS)}")
+        print(f"===> Training set: {len(train_df)} examples, {len(tags)} tags (target tags)")
+        print(f"===> Target tags present in dataset: {sum(y_train.sum(axis=0) > 0)}/{len(tags)}")
 
-        # Show tag distribution
+        # Tag distribution (for target tags only)
         tag_counts = y_train.sum(axis=0)
         print("\n==== Tag distribution (Target tags): ====")
         for tag in self.TARGET_TAGS:
-            if tag in self.tag_to_idx:
-                idx = self.tag_to_idx[tag]
-                count = int(tag_counts[idx])
-                print(f"  {tag:<20} {count:>5} ({count/len(train_df)*100:.1f}%)")
+            idx = self.tag_to_idx[tag]
+            count = int(tag_counts[idx])
+            print(f"  {tag:<20} {count:>5} ({count/len(train_df)*100:.1f}%)")
 
         print("\n==== Extracting features... ====")
-        X_train = self.feature_extractor.fit_transform(train_texts, use_stats_features)
+        X_train = self.feature_extractor.fit_transform(train_texts, use_stats_features=use_stats_features)
         print(f"==== Feature vector size: {X_train.shape[1]} ====")
 
-        # use injected classifier or default LogisticRegression
+        # Default classifier fallback
         if self.classifier is None:
-            print("\n[!] No classifier specified — using default Logistic Regression.")
+            print("\n[!] No classifier specified — using default Logistic Regression (One-vs-rest).")
             self.classifier = OneVsRestClassifier(
-                LogisticRegression(
-                    max_iter=1000,
-                    C=1.0,
-                    class_weight="balanced",
-                    random_state=42,
-                    solver="lbfgs",
-                ),
-                n_jobs=-1,
+                LogisticRegression(max_iter=1000, C=1.0, class_weight="balanced", random_state=42, solver="lbfgs"),
+                n_jobs=-1
             )
 
         print(f"\n==== Training model: {type(self.classifier.estimator).__name__} ====")
@@ -215,43 +240,41 @@ class BaselineTagPredictor:
         train_time = time.time() - start_time
         print(f"==== Training completed in {train_time:.2f}s ====")
 
-        # Evaluate on validation set
+        # Evaluate on validation set if provided
         if val_df is not None:
             print("\n==== Evaluation on validation set: ====")
-            val_texts = val_df["text"].fillna("").tolist()
+            val_texts = self._build_texts_from_df(val_df)
             y_val, _ = self.prepare_labels(val_df)
-            X_val = self.feature_extractor.transform(val_texts, use_stats_features)
+            X_val = self.feature_extractor.transform(val_texts, use_stats_features=use_stats_features)
             self.evaluate(X_val, y_val)
 
         return X_train, y_train
-    
-    def predict(self, texts: List[str], threshold: float = 0.5, use_stats_features=False) -> List[List[str]]:
-        """Predict tags for new problems"""
+
+    def predict(self, texts: List[str], threshold: float = 0.5, use_stats_features: bool = False) -> List[List[str]]:
+        """Predict tags for raw text inputs (list of strings). Returns list of predicted target tags."""
         if self.classifier is None:
             raise ValueError("Model must be trained before prediction")
-
-        X = self.feature_extractor.transform(texts, use_stats_features)
+        X = self.feature_extractor.transform(texts, use_stats_features=use_stats_features)
         y_prob = self.classifier.predict_proba(X)
 
         predictions = []
         for probs in y_prob:
-            pred_tags = [
-                self.idx_to_tag[idx]
-                for idx, prob in enumerate(probs)
-                if prob >= threshold
-            ]
+            pred_tags = [self.idx_to_tag[idx] for idx, prob in enumerate(probs) if prob >= threshold]
             predictions.append(pred_tags)
         return predictions
 
-    def predict_proba(self, texts: List[str], use_stats_features=False) -> np.ndarray:
+    def predict_from_df(self, df: pd.DataFrame, threshold: float = 0.5, use_stats_features: bool = False) -> List[List[str]]:
+        texts = self._build_texts_from_df(df)
+        return self.predict(texts, threshold=threshold, use_stats_features=use_stats_features)
+
+    def predict_proba(self, texts: List[str], use_stats_features: bool = False) -> np.ndarray:
         if self.classifier is None:
             raise ValueError("Model must be trained before prediction")
-
-        X = self.feature_extractor.transform(texts, use_stats_features)
+        X = self.feature_extractor.transform(texts, use_stats_features=use_stats_features)
         return self.classifier.predict_proba(X)
 
     def evaluate(self, X, y_true, threshold: float = 0.5):
-        """Evaluate model performance"""
+        """Evaluate and print metrics. y_true must match TARGET_TAGS order."""
         y_prob = self.classifier.predict_proba(X)
         y_pred = (y_prob >= threshold).astype(int)
 
@@ -271,19 +294,16 @@ class BaselineTagPredictor:
         print(f"  F1 (samples avg): {f1:.4f}")
         print(f"  F1 (macro avg): {f1_macro:.4f}")
 
-        # Per-tag detail
+        # Per-tag detail for TARGET_TAGS
         print("\n==== Target Tags Performance ====")
         print(f"{'Tag':<20}{'Prec':>10}{'Rec':>10}{'F1':>10}{'Support':>10}{'Pred':>10}")
         for tag in self.TARGET_TAGS:
-            if tag in self.tag_to_idx:
-                idx = self.tag_to_idx[tag]
-                yt, yp = y_true[:, idx], y_pred[:, idx]
-                support, predicted = int(yt.sum()), int(yp.sum())
-                if support > 0:
-                    p, r, f, _ = precision_recall_fscore_support(
-                        yt, yp, average="binary", zero_division=0
-                    )
-                    print(f"{tag:<20}{p:>10.4f}{r:>10.4f}{f:>10.4f}{support:>10d}{predicted:>10d}")
+            idx = self.tag_to_idx[tag]
+            yt, yp = y_true[:, idx], y_pred[:, idx]
+            support, predicted = int(yt.sum()), int(yp.sum())
+            if support > 0:
+                p, r, f, _ = precision_recall_fscore_support(yt, yp, average="binary", zero_division=0)
+                print(f"{tag:<20}{p:>10.4f}{r:>10.4f}{f:>10.4f}{support:>10d}{predicted:>10d}")
 
         return {
             "hamming_loss": hamming,
@@ -294,9 +314,8 @@ class BaselineTagPredictor:
             "recall_macro": recall_macro,
             "f1_macro": f1_macro,
         }
-    
+        
     def save(self, path: str):
-        """Save model to disk"""
         model_data = {
             "feature_extractor": self.feature_extractor,
             "classifier": self.classifier,
@@ -304,6 +323,8 @@ class BaselineTagPredictor:
             "tag_to_idx": self.tag_to_idx,
             "idx_to_tag": self.idx_to_tag,
             "TARGET_TAGS": self.TARGET_TAGS,
+            "embedding_name": self.embedding_name,
+            "use_code": self.use_code,
         }
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "wb") as f:
@@ -311,18 +332,20 @@ class BaselineTagPredictor:
         print(f"==== Model saved to {path} ====")
 
     def load(self, path: str):
-        """Load model from disk"""
         with open(path, "rb") as f:
             model_data = pickle.load(f)
         self.feature_extractor = model_data["feature_extractor"]
         self.classifier = model_data["classifier"]
-        self.all_tags = model_data["all_tags"]
-        self.tag_to_idx = model_data["tag_to_idx"]
-        self.idx_to_tag = model_data["idx_to_tag"]
-        self.TARGET_TAGS = model_data["TARGET_TAGS"]
-        print(f"==== Model loaded from {path} ====")
+        self.all_tags = model_data.get("all_tags", None)
+        self.tag_to_idx = model_data.get("tag_to_idx", None)
+        self.idx_to_tag = model_data.get("idx_to_tag", None)
+        self.TARGET_TAGS = model_data.get("TARGET_TAGS", self.TARGET_TAGS)
+        self.embedding_name = model_data.get("embedding_name", getattr(self, "embedding_name", "TFIDF"))
+        self.use_code = model_data.get("use_code", getattr(self, "use_code", False))
+        print(f"==== Model loaded from {path} (embedding={self.embedding_name}, use_code={self.use_code})")
 
-# Classifier choice
+
+# classifier choice 
 CLASSIFIERS = {
     "logistic": lambda: OneVsRestClassifier(LogisticRegression(max_iter=2000), n_jobs=-1),
     "random_forest": lambda: OneVsRestClassifier(
@@ -334,6 +357,8 @@ CLASSIFIERS = {
     ),
 }
 
+
+# CLI
 @click.group()
 def cli():
     """Tag Predictor CLI for Codeforces Problems"""
@@ -347,25 +372,29 @@ def cli():
 @click.option('--model-path', default='models/baseline_model.pkl', help='Path to save the trained model')
 @click.option('--use-val', is_flag=True, help='Use validation set for evaluation during training')
 @click.option('--use-stats-features', is_flag=True, help='Include statistical features in training')
-def train(data_root, classifier, model_path, use_val, use_stats_features):
+@click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
+@click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
+def train(data_root, classifier, model_path, use_val, use_stats_features, vectorizer, use_code):
     """Train the tag prediction model"""
-    click.echo(f"==== Training Tag Predictor ({classifier}) ====\n")
+    click.echo(f"==== Training Tag Predictor ({classifier}, vectorizer={vectorizer.upper()}, use_code={use_code}) ====\n")
 
-    # Load data
-    click.echo(f"Loading data from {data_root}...")
+    # Load data (expects JSONs with fields: description, code, original_tags / tags)
     train_df, val_df, _ = load_all_splits(data_root)
 
-    # Initialize classifier
-    clf = CLASSIFIERS[classifier]()
+    # if load_all_splits returns 'text' instead of 'description'/'code', try to adapt
+    for df_ in (train_df, val_df):
+        if df_ is not None and "text" in df_.columns and "description" not in df_.columns:
+            df_["description"] = df_["text"]
 
-    # Train model
-    predictor = BaselineTagPredictor(classifier=clf)
-    if use_val:
+    # Initialize classifier and predictor
+    clf = CLASSIFIERS[classifier]()
+    predictor = BaselineTagPredictor(classifier=clf, vectorizer_type=vectorizer, use_code=use_code)
+
+    if use_val and val_df is not None:
         predictor.train(train_df, val_df=val_df, use_stats_features=use_stats_features)
     else:
         predictor.train(train_df, use_stats_features=use_stats_features)
 
-    # Save model
     predictor.save(model_path)
     click.echo(f"\n==== Training complete! Model saved to {model_path} ====")
 
@@ -377,15 +406,18 @@ def train(data_root, classifier, model_path, use_val, use_stats_features):
 @click.option('--use-stats-features', is_flag=True, help='Use statistical features during prediction')
 @click.option('--output', default='predictions.json')
 @click.option('--threshold', default=0.5)
-def predict(data_root, model_path, split, use_stats_features, output, threshold):
+@click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
+@click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
+def predict(data_root, model_path, split, use_stats_features, output, threshold, vectorizer, use_code):
     """Predict tags for problems in a dataset split"""
     click.echo(f"==== Predicting Tags on {split} set ====\n")
 
-    predictor = BaselineTagPredictor()
+    predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
     predictor.load(model_path)
 
     df = load_dataset_split(os.path.join(data_root, split))
-    texts = df['text'].fillna("").tolist()
+
+    texts = predictor._build_texts_from_df(df)
 
     click.echo(f"Making predictions on {len(df)} examples...")
     start = time.time()
@@ -398,8 +430,9 @@ def predict(data_root, model_path, split, use_stats_features, output, threshold)
         results.append({
             "index": i,
             "predicted_tags": pred_tags,
-            "true_tags": row.get('tags', []),
-            "text_preview": row['text'][:200] + "..."
+            "true_tags": row.get('tags', row.get('original_tags', [])),
+            "description_preview": (row.get('description') or "")[:300] + "...",
+            "code_preview": (row.get('code') or "")[:300] + "..."
         })
 
     os.makedirs(os.path.dirname(output) or '.', exist_ok=True)
@@ -407,7 +440,7 @@ def predict(data_root, model_path, split, use_stats_features, output, threshold)
         json.dump(results, f, indent=2)
 
     click.echo(f"\n===> Predictions saved to {output}")
-    click.echo(f"===> Average prediction time: {elapsed/len(df)*1000:.2f} ms/sample")
+    click.echo(f"===> Avg prediction time: {elapsed/len(df)*1000:.2f} ms/sample")
     click.echo("\n==== Prediction complete! ====")
 
 
@@ -419,15 +452,18 @@ def predict(data_root, model_path, split, use_stats_features, output, threshold)
 @click.option('--threshold', default=0.5)
 @click.option('--log-path', default='results.md', help='Path to the markdown results log')
 @click.option('--notes', default='', help='Optional notes for this experiment')
-def evaluate(data_root, model_path, split, use_stats_features, threshold, log_path, notes):
+@click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
+@click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
+def evaluate(data_root, model_path, split, use_stats_features, threshold, log_path, notes, vectorizer, use_code):
     """Evaluate model on a dataset split"""
     click.echo(f"==== Evaluating on {split} set ====\n")
 
-    predictor = BaselineTagPredictor()
+    predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
     predictor.load(model_path)
 
     df = load_dataset_split(os.path.join(data_root, split))
-    texts = df['text'].fillna("").tolist()
+    texts = predictor._build_texts_from_df(df)
+
     X = predictor.feature_extractor.transform(texts, use_stats_features)
     y_true, _ = predictor.prepare_labels(df)
 
@@ -435,8 +471,8 @@ def evaluate(data_root, model_path, split, use_stats_features, threshold, log_pa
     metrics = predictor.evaluate(X, y_true, threshold=threshold)
 
     # Log results
-    classifier_name = type(predictor.classifier.estimator).__name__
-    embedding_name = getattr(predictor, "embedding_name", "TF-IDF")
+    classifier_name = type(predictor.classifier.estimator).__name__ if predictor.classifier is not None else "None"
+    embedding_name = getattr(predictor, "embedding_name", "TFIDF")
 
     logger = ExperimentLogger(log_path)
     logger.log_result(
@@ -457,13 +493,17 @@ def evaluate(data_root, model_path, split, use_stats_features, threshold, log_pa
 @click.option('--model-path', default='models/baseline_model.pkl')
 @click.option('--use-stats-features', is_flag=True, help='Include statistical features')
 @click.option('--threshold', default=0.5)
-def predict_one(text, model_path, use_stats_features, threshold):
+@click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
+@click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
+def predict_one(text, model_path, use_stats_features, threshold, vectorizer, use_code):
     """Predict tags for a single problem description"""
-    click.echo("==== Predicting tags for single problem ====\n")
+    click.echo(f"==== Predicting single sample (vectorizer={vectorizer}, use_code={use_code}) ====\n")
 
-    predictor = BaselineTagPredictor()
+    predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
     predictor.load(model_path)
 
+    # Build text (if user wants to pass description only, that works)
+    # If user needs to include code, they can pass a combined string "desc\n\n<CODE>"
     start = time.time()
     pred_tags = predictor.predict([text], threshold=threshold, use_stats_features=use_stats_features)[0]
     elapsed = time.time() - start
