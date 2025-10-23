@@ -38,7 +38,8 @@ def load_dataset_split(split_dir):
 
         if tags:
             samples.append({
-                "text": desc.strip() + "\n\n" + code.strip(),
+                "description": desc.strip(),
+                "code": code.strip(),
                 "tags": tags
             })
 
