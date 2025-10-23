@@ -37,7 +37,7 @@ TARGET_TAGS = [
 class FeatureExtractor:
     """Text feature extractor using TF-IDF or CountVectorizer, optional statistical features."""
 
-    def __init__(self, vectorizer_type: str = "tfidf", max_features_text: int = 8000):
+    def __init__(self, vectorizer_type: str = "tfidf", max_features_text: int = 20000):
         self.vectorizer_type = vectorizer_type.lower()
         if self.vectorizer_type == "tfidf":
             self.text_vectorizer = TfidfVectorizer(
