@@ -1,0 +1,48 @@
+{
+  "num_samples": 3459,
+  "avg_desc_words": 166.57386527898237,
+  "avg_code_lines": 50.772766695576756,
+  "avg_tags": 2.809482509395779,
+  "top_tags": [
+    {
+      "tag": "greedy",
+      "count": 1231
+    },
+    {
+      "tag": "implementation",
+      "count": 1115
+    },
+    {
+      "tag": "math",
+      "count": 976
+    },
+    {
+      "tag": "constructive algorithms",
+      "count": 718
+    },
+    {
+      "tag": "dp",
+      "count": 678
+    },
+    {
+      "tag": "brute force",
+      "count": 588
+    },
+    {
+      "tag": "data structures",
+      "count": 539
+    },
+    {
+      "tag": "sortings",
+      "count": 477
+    },
+    {
+      "tag": "binary search",
+      "count": 375
+    },
+    {
+      "tag": "graphs",
+      "count": 370
+    }
+  ]
+}
