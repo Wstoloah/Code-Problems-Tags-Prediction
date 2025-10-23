@@ -1,0 +1,800 @@
+"""
+Fine-tuning CodeBERT for Multi-Label Tag Classification
+- Handles class imbalance with focal/asymmetric loss
+- Early stopping and learning rate scheduling
+- Comprehensive evaluation and checkpointing
+"""
+
+import os
+import json
+import time
+import warnings
+from pathlib import Path
+from typing import List, Dict, Optional, Tuple
+from dataclasses import dataclass
+
+import click
+import numpy as np
+import pandas as pd
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from torch.optim import AdamW
+from transformers import (
+    AutoTokenizer,
+    AutoModel,
+    get_linear_schedule_with_warmup,
+    get_cosine_schedule_with_warmup
+)
+from sklearn.preprocessing import MultiLabelBinarizer
+from sklearn.metrics import (
+    classification_report,
+    hamming_loss,
+    precision_recall_fscore_support,
+    roc_auc_score
+)
+from tqdm import tqdm
+
+from utils.data_loader import load_all_splits, load_dataset_split
+from utils.logger import ExperimentLogger
+
+warnings.filterwarnings('ignore')
+
+# Target tags
+TARGET_TAGS = [
+    'math', 'graphs', 'strings', 'number theory',
+    'trees', 'geometry', 'games', 'probabilities'
+]
+
+
+# Dataset
+
+class CodeProblemsDataset(Dataset):
+    """Dataset for code problems with descriptions and optional code"""
+    
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        tokenizer,
+        target_tags: List[str],
+        max_length: int = 512,
+        use_code: bool = False
+    ):
+        """
+        Args:
+            df: DataFrame with 'description', 'tags', and optionally 'code'
+            tokenizer: HuggingFace tokenizer
+            target_tags: List of target tag names
+            max_length: Maximum sequence length
+            use_code: Whether to include code with description
+        """
+        self.df = df.reset_index(drop=True)
+        self.tokenizer = tokenizer
+        self.max_length = max_length
+        self.use_code = use_code
+        
+        # Prepare labels
+        self.mlb = MultiLabelBinarizer(classes=target_tags)
+        self.mlb.fit([target_tags])
+        self.labels = self.mlb.transform(df["tags"])
+        
+        # Validate data
+        if "description" not in df.columns:
+            raise ValueError("DataFrame must have 'description' column")
+        if use_code and "code" not in df.columns:
+            raise ValueError("use_code=True but 'code' column not found")
+    
+    def __len__(self):
+        return len(self.df)
+    
+    def __getitem__(self, idx):
+        row = self.df.iloc[idx]
+        
+        # Build text
+        text = row["description"].strip() if pd.notna(row["description"]) else ""
+        if self.use_code and "code" in self.df.columns:
+            code = row["code"].strip() if pd.notna(row["code"]) else ""
+            if code:
+                text = f"{text}\n\n{code}"
+        
+        # Tokenize
+        encoding = self.tokenizer(
+            text,
+            max_length=self.max_length,
+            padding="max_length",
+            truncation=True,
+            return_tensors="pt"
+        )
+        
+        return {
+            "input_ids": encoding["input_ids"].squeeze(0),
+            "attention_mask": encoding["attention_mask"].squeeze(0),
+            "labels": torch.tensor(self.labels[idx], dtype=torch.float32)
+        }
+
+
+# Model
+
+class CodeBERTForMultiLabel(nn.Module):
+    """CodeBERT model for multi-label classification"""
+    
+    def __init__(
+        self,
+        model_name: str = "microsoft/codebert-base",
+        num_labels: int = 8,
+        dropout: float = 0.1,
+        freeze_encoder: bool = False
+    ):
+        """
+        Args:
+            model_name: Pre-trained model name
+            num_labels: Number of output labels
+            dropout: Dropout probability
+            freeze_encoder: Whether to freeze encoder weights
+        """
+        super().__init__()
+        
+        self.encoder = AutoModel.from_pretrained(model_name)
+        self.dropout = nn.Dropout(dropout)
+        
+        # Classification head
+        hidden_size = self.encoder.config.hidden_size
+        self.classifier = nn.Linear(hidden_size, num_labels)
+        
+        # Optionally freeze encoder
+        if freeze_encoder:
+            for param in self.encoder.parameters():
+                param.requires_grad = False
+    
+    def forward(self, input_ids, attention_mask, labels=None):
+        """
+        Forward pass
+        
+        Returns:
+            loss (optional), logits
+        """
+        # Encode
+        outputs = self.encoder(
+            input_ids=input_ids,
+            attention_mask=attention_mask
+        )
+        
+        # Pool: use [CLS] token representation
+        pooled_output = outputs.last_hidden_state[:, 0, :]
+        pooled_output = self.dropout(pooled_output)
+        
+        # Classify
+        logits = self.classifier(pooled_output)
+        
+        # Compute loss if labels provided
+        loss = None
+        if labels is not None:
+            loss_fct = nn.BCEWithLogitsLoss()
+            loss = loss_fct(logits, labels)
+        
+        return loss, logits
+
+
+# Loss Functions
+
+class FocalLoss(nn.Module):
+    """
+    Focal Loss for handling class imbalance.
+    FL(p_t) = -α_t * (1 - p_t)^γ * log(p_t)
+    """
+    
+    def __init__(self, alpha: float = 0.25, gamma: float = 2.0):
+        super().__init__()
+        self.alpha = alpha
+        self.gamma = gamma
+    
+    def forward(self, logits, targets):
+        bce_loss = nn.functional.binary_cross_entropy_with_logits(
+            logits, targets, reduction='none'
+        )
+        probs = torch.sigmoid(logits)
+        p_t = probs * targets + (1 - probs) * (1 - targets)
+        
+        alpha_t = self.alpha * targets + (1 - self.alpha) * (1 - targets)
+        focal_weight = alpha_t * (1 - p_t) ** self.gamma
+        
+        loss = focal_weight * bce_loss
+        return loss.mean()
+
+
+class AsymmetricLoss(nn.Module):
+    """
+    Asymmetric Loss for multi-label classification.
+    Different focus on positive/negative samples.
+    """
+    
+    def __init__(
+        self,
+        gamma_neg: float = 4.0,
+        gamma_pos: float = 1.0,
+        clip: float = 0.05
+    ):
+        super().__init__()
+        self.gamma_neg = gamma_neg
+        self.gamma_pos = gamma_pos
+        self.clip = clip
+    
+    def forward(self, logits, targets):
+        # Probabilities
+        probs = torch.sigmoid(logits)
+        
+        # Positive and negative probabilities
+        probs_pos = probs
+        probs_neg = 1 - probs
+        
+        # Asymmetric clipping
+        if self.clip > 0:
+            probs_neg = (probs_neg + self.clip).clamp(max=1)
+        
+        # Loss calculation
+        loss_pos = targets * torch.log(probs_pos.clamp(min=1e-8)) * (1 - probs_pos) ** self.gamma_pos
+        loss_neg = (1 - targets) * torch.log(probs_neg.clamp(min=1e-8)) * (1 - probs_neg) ** self.gamma_neg
+        
+        loss = -loss_pos - loss_neg
+        return loss.mean()
+
+
+class ClassBalancedLoss(nn.Module):
+    """Class-balanced loss using effective number of samples"""
+    
+    def __init__(self, samples_per_class, beta: float = 0.9999):
+        super().__init__()
+        effective_num = 1.0 - np.power(beta, samples_per_class)
+        weights = (1.0 - beta) / np.array(effective_num)
+        weights = weights / weights.sum() * len(weights)
+        self.weights = torch.tensor(weights, dtype=torch.float32)
+    
+    def forward(self, logits, targets):
+        self.weights = self.weights.to(logits.device)
+        bce_loss = nn.functional.binary_cross_entropy_with_logits(
+            logits, targets, reduction='none'
+        )
+        weighted_loss = bce_loss * self.weights.unsqueeze(0)
+        return weighted_loss.mean()
+
+
+# Trainer
+
+@dataclass
+class TrainingConfig:
+    """Training configuration"""
+    model_name: str = "microsoft/codebert-base"
+    num_epochs: int = 5
+    batch_size: int = 16
+    learning_rate: float = 2e-5
+    max_length: int = 512
+    warmup_steps: int = 0
+    warmup_ratio: float = 0.1
+    weight_decay: float = 0.01
+    dropout: float = 0.1
+    gradient_clip: float = 1.0
+    use_code: bool = False
+    freeze_encoder: bool = False
+    loss_type: str = "bce"  # bce, focal, asymmetric, class_balanced
+    focal_alpha: float = 0.25
+    focal_gamma: float = 2.0
+    scheduler: str = "linear"  # linear, cosine
+    early_stopping_patience: int = 3
+    eval_steps: int = 500
+    save_steps: int = 500
+    logging_steps: int = 100
+
+
+class Trainer:
+    """Trainer for fine-tuning CodeBERT"""
+    
+    def __init__(
+        self,
+        config: TrainingConfig,
+        model: nn.Module,
+        train_dataset: Dataset,
+        val_dataset: Optional[Dataset] = None,
+        output_dir: str = "models/finetuned",
+        device: Optional[torch.device] = None
+    ):
+        self.config = config
+        self.model = model
+        self.train_dataset = train_dataset
+        self.val_dataset = val_dataset
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model.to(self.device)
+        
+        # Dataloaders
+        self.train_loader = DataLoader(
+            train_dataset,
+            batch_size=config.batch_size,
+            shuffle=True,
+            num_workers=2,
+            pin_memory=True
+        )
+        
+        self.val_loader = None
+        if val_dataset is not None:
+            self.val_loader = DataLoader(
+                val_dataset,
+                batch_size=config.batch_size * 2,
+                shuffle=False,
+                num_workers=2,
+                pin_memory=True
+            )
+        
+        # Optimizer
+        no_decay = ["bias", "LayerNorm.weight"]
+        optimizer_grouped_parameters = [
+            {
+                "params": [p for n, p in model.named_parameters() 
+                          if not any(nd in n for nd in no_decay)],
+                "weight_decay": config.weight_decay,
+            },
+            {
+                "params": [p for n, p in model.named_parameters() 
+                          if any(nd in n for nd in no_decay)],
+                "weight_decay": 0.0,
+            },
+        ]
+        self.optimizer = AdamW(
+            optimizer_grouped_parameters,
+            lr=config.learning_rate
+        )
+        
+        # Scheduler
+        num_training_steps = len(self.train_loader) * config.num_epochs
+        num_warmup_steps = config.warmup_steps or int(num_training_steps * config.warmup_ratio)
+        
+        if config.scheduler == "cosine":
+            self.scheduler = get_cosine_schedule_with_warmup(
+                self.optimizer,
+                num_warmup_steps=num_warmup_steps,
+                num_training_steps=num_training_steps
+            )
+        else:
+            self.scheduler = get_linear_schedule_with_warmup(
+                self.optimizer,
+                num_warmup_steps=num_warmup_steps,
+                num_training_steps=num_training_steps
+            )
+        
+        # Loss function
+        self.criterion = self._get_loss_function()
+        
+        # Training state
+        self.global_step = 0
+        self.best_val_f1 = 0
+        self.epochs_without_improvement = 0
+        self.history = {
+            "train_loss": [],
+            "val_loss": [],
+            "val_f1": [],
+            "val_hamming": []
+        }
+    
+    def _get_loss_function(self):
+        """Get loss function based on config"""
+        if self.config.loss_type == "focal":
+            return FocalLoss(
+                alpha=self.config.focal_alpha,
+                gamma=self.config.focal_gamma
+            )
+        elif self.config.loss_type == "asymmetric":
+            return AsymmetricLoss()
+        elif self.config.loss_type == "class_balanced":
+            # Calculate samples per class
+            labels = np.array([self.train_dataset[i]["labels"].numpy() 
+                             for i in range(len(self.train_dataset))])
+            samples_per_class = labels.sum(axis=0)
+            return ClassBalancedLoss(samples_per_class)
+        else:  # bce
+            return nn.BCEWithLogitsLoss()
+    
+    def train(self):
+        """Main training loop"""
+        print("=" * 80)
+        print("STARTING TRAINING")
+        print("=" * 80)
+        print(f"Device: {self.device}")
+        print(f"Model: {self.config.model_name}")
+        print(f"Training samples: {len(self.train_dataset)}")
+        print(f"Validation samples: {len(self.val_dataset) if self.val_dataset else 0}")
+        print(f"Epochs: {self.config.num_epochs}")
+        print(f"Batch size: {self.config.batch_size}")
+        print(f"Learning rate: {self.config.learning_rate}")
+        print(f"Loss type: {self.config.loss_type}")
+        print("=" * 80)
+        
+        start_time = time.time()
+        
+        for epoch in range(self.config.num_epochs):
+            print(f"\n{'='*80}")
+            print(f"EPOCH {epoch + 1}/{self.config.num_epochs}")
+            print(f"{'='*80}")
+            
+            # Train
+            train_loss = self._train_epoch()
+            self.history["train_loss"].append(train_loss)
+            
+            # Evaluate
+            if self.val_loader is not None:
+                val_metrics = self._evaluate()
+                self.history["val_loss"].append(val_metrics["loss"])
+                self.history["val_f1"].append(val_metrics["f1_macro"])
+                self.history["val_hamming"].append(val_metrics["hamming_loss"])
+                
+                print(f"\n ===> Epoch {epoch + 1} Summary:")
+                print(f"  Train Loss:      {train_loss:.4f}")
+                print(f"  Val Loss:        {val_metrics['loss']:.4f}")
+                print(f"  Val F1 (macro):  {val_metrics['f1_macro']:.4f}")
+                print(f"  Val F1 (micro):  {val_metrics['f1_micro']:.4f}")
+                print(f"  Hamming Loss:    {val_metrics['hamming_loss']:.4f}")
+                
+                # Save best model
+                if val_metrics["f1_macro"] > self.best_val_f1:
+                    self.best_val_f1 = val_metrics["f1_macro"]
+                    self.epochs_without_improvement = 0
+                    self._save_checkpoint("best_model")
+                    print(f"  ✓ New best model saved! (F1: {self.best_val_f1:.4f})")
+                else:
+                    self.epochs_without_improvement += 1
+                    print(f"  ⚠ No improvement for {self.epochs_without_improvement} epoch(s)")
+                
+                # Early stopping
+                if self.epochs_without_improvement >= self.config.early_stopping_patience:
+                    print(f"\n /!\ Early stopping triggered after {epoch + 1} epochs")
+                    break
+            
+            # Save periodic checkpoint
+            if (epoch + 1) % 2 == 0:
+                self._save_checkpoint(f"checkpoint_epoch_{epoch + 1}")
+        
+        elapsed = time.time() - start_time
+        print(f"\n{'='*80}")
+        print(f"TRAINING COMPLETED in {elapsed/60:.2f} minutes")
+        print(f"Best validation F1: {self.best_val_f1:.4f}")
+        print(f"{'='*80}")
+        
+        # Save final model and training history
+        self._save_checkpoint("final_model")
+        self._save_history()
+        
+        return self.history
+    
+    def _train_epoch(self):
+        """Train for one epoch"""
+        self.model.train()
+        total_loss = 0
+        
+        progress_bar = tqdm(self.train_loader, desc="Training")
+        
+        for batch_idx, batch in enumerate(progress_bar):
+            # Move to device
+            input_ids = batch["input_ids"].to(self.device)
+            attention_mask = batch["attention_mask"].to(self.device)
+            labels = batch["labels"].to(self.device)
+            
+            # Forward pass
+            self.optimizer.zero_grad()
+            _, logits = self.model(input_ids, attention_mask)
+            loss = self.criterion(logits, labels)
+            
+            # Backward pass
+            loss.backward()
+            
+            # Gradient clipping
+            if self.config.gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.config.gradient_clip
+                )
+            
+            self.optimizer.step()
+            self.scheduler.step()
+            
+            # Update metrics
+            total_loss += loss.item()
+            self.global_step += 1
+            
+            # Update progress bar
+            progress_bar.set_postfix({
+                "loss": f"{loss.item():.4f}",
+                "lr": f"{self.scheduler.get_last_lr()[0]:.2e}"
+            })
+            
+            # Logging
+            if self.global_step % self.config.logging_steps == 0:
+                avg_loss = total_loss / (batch_idx + 1)
+                print(f"\n  Step {self.global_step}: loss={avg_loss:.4f}")
+        
+        return total_loss / len(self.train_loader)
+    
+    @torch.no_grad()
+    def _evaluate(self):
+        """Evaluate on validation set"""
+        self.model.eval()
+        total_loss = 0
+        all_logits = []
+        all_labels = []
+        
+        for batch in tqdm(self.val_loader, desc="Evaluating"):
+            input_ids = batch["input_ids"].to(self.device)
+            attention_mask = batch["attention_mask"].to(self.device)
+            labels = batch["labels"].to(self.device)
+            
+            _, logits = self.model(input_ids, attention_mask)
+            loss = self.criterion(logits, labels)
+            
+            total_loss += loss.item()
+            all_logits.append(logits.cpu())
+            all_labels.append(labels.cpu())
+        
+        # Concatenate all predictions
+        all_logits = torch.cat(all_logits, dim=0)
+        all_labels = torch.cat(all_labels, dim=0)
+        
+        # Convert to predictions
+        probs = torch.sigmoid(all_logits).numpy()
+        preds = (probs >= 0.5).astype(int)
+        labels_np = all_labels.numpy()
+        
+        # Compute metrics
+        hamming = hamming_loss(labels_np, preds)
+        precision_macro, recall_macro, f1_macro, _ = precision_recall_fscore_support(
+            labels_np, preds, average="macro", zero_division=0
+        )
+        precision_micro, recall_micro, f1_micro, _ = precision_recall_fscore_support(
+            labels_np, preds, average="micro", zero_division=0
+        )
+        
+        return {
+            "loss": total_loss / len(self.val_loader),
+            "hamming_loss": float(hamming),
+            "precision_macro": float(precision_macro),
+            "recall_macro": float(recall_macro),
+            "f1_macro": float(f1_macro),
+            "precision_micro": float(precision_micro),
+            "recall_micro": float(recall_micro),
+            "f1_micro": float(f1_micro),
+        }
+    
+    def _save_checkpoint(self, name: str):
+        """Save model checkpoint"""
+        checkpoint_dir = self.output_dir / name
+        checkpoint_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save model
+        torch.save(self.model.state_dict(), checkpoint_dir / "model.pt")
+        
+        # Save config
+        config_dict = vars(self.config)
+        with open(checkpoint_dir / "config.json", "w") as f:
+            json.dump(config_dict, f, indent=2)
+        
+        print(f"  💾 Checkpoint saved: {checkpoint_dir}")
+    
+    def _save_history(self):
+        """Save training history"""
+        history_path = self.output_dir / "training_history.json"
+        with open(history_path, "w") as f:
+            json.dump(self.history, f, indent=2)
+
+
+# Inference
+class FineTunedPredictor:
+    """Predictor using fine-tuned model"""
+    
+    def __init__(
+        self,
+        model_path: str,
+        model_name: str = "microsoft/codebert-base",
+        target_tags: List[str] = None,
+        device: Optional[torch.device] = None
+    ):
+        self.device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.target_tags = target_tags or TARGET_TAGS
+        
+        # Load tokenizer
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Load model
+        self.model = CodeBERTForMultiLabel(
+            model_name=model_name,
+            num_labels=len(self.target_tags)
+        )
+        self.model.load_state_dict(torch.load(model_path, map_location=self.device))
+        self.model.to(self.device)
+        self.model.eval()
+        
+        print(f"✓ Loaded fine-tuned model from {model_path}")
+    
+    @torch.no_grad()
+    def predict(
+        self,
+        texts: List[str],
+        threshold: float = 0.5,
+        batch_size: int = 32
+    ) -> Tuple[List[List[str]], np.ndarray]:
+        """
+        Predict tags for texts
+        
+        Returns:
+            predictions: List of tag lists
+            probabilities: Array of shape (num_texts, num_tags)
+        """
+        all_probs = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            
+            # Tokenize
+            encodings = self.tokenizer(
+                batch_texts,
+                max_length=512,
+                padding=True,
+                truncation=True,
+                return_tensors="pt"
+            )
+            
+            input_ids = encodings["input_ids"].to(self.device)
+            attention_mask = encodings["attention_mask"].to(self.device)
+            
+            # Predict
+            _, logits = self.model(input_ids, attention_mask)
+            probs = torch.sigmoid(logits).cpu().numpy()
+            all_probs.append(probs)
+        
+        # Concatenate
+        all_probs = np.vstack(all_probs)
+        
+        # Apply threshold
+        predictions = []
+        for prob_vec in all_probs:
+            pred_tags = [
+                self.target_tags[i]
+                for i, prob in enumerate(prob_vec)
+                if prob >= threshold
+            ]
+            predictions.append(pred_tags)
+        
+        return predictions, all_probs
+
+
+# CLI
+
+@click.group()
+def cli():
+    """Fine-tuning CLI for CodeBERT multi-label classification"""
+    pass
+
+
+@cli.command()
+@click.argument("data_root", type=click.Path(exists=True))
+@click.option("--output-dir", default="models/finetuned", help="Output directory")
+@click.option("--model-name", default="microsoft/codebert-base", help="Base model")
+@click.option("--epochs", default=5, help="Number of epochs")
+@click.option("--batch-size", default=16, help="Batch size")
+@click.option("--learning-rate", default=2e-5, type=float, help="Learning rate")
+@click.option("--max-length", default=512, help="Max sequence length")
+@click.option("--use-code", is_flag=True, help="Include code with description")
+@click.option("--loss-type", type=click.Choice(["bce", "focal", "asymmetric", "class_balanced"]), 
+              default="bce", help="Loss function")
+@click.option("--dropout", default=0.1, type=float, help="Dropout rate")
+@click.option("--warmup-ratio", default=0.1, type=float, help="Warmup ratio")
+@click.option("--early-stopping", default=3, help="Early stopping patience")
+def train(data_root, output_dir, model_name, epochs, batch_size, learning_rate,
+          max_length, use_code, loss_type, dropout, warmup_ratio, early_stopping):
+    """Fine-tune CodeBERT for tag prediction"""
+    try:
+        # Load data
+        print("===>  Loading data...")
+        train_df, val_df, _ = load_all_splits(data_root)
+        
+        # Create datasets
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        train_dataset = CodeProblemsDataset(
+            train_df, tokenizer, TARGET_TAGS, max_length, use_code
+        )
+        val_dataset = CodeProblemsDataset(
+            val_df, tokenizer, TARGET_TAGS, max_length, use_code
+        )
+        
+        # Create model
+        model = CodeBERTForMultiLabel(
+            model_name=model_name,
+            num_labels=len(TARGET_TAGS),
+            dropout=dropout
+        )
+        
+        # Training config
+        config = TrainingConfig(
+            model_name=model_name,
+            num_epochs=epochs,
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            max_length=max_length,
+            warmup_ratio=warmup_ratio,
+            dropout=dropout,
+            use_code=use_code,
+            loss_type=loss_type,
+            early_stopping_patience=early_stopping
+        )
+        
+        # Train
+        trainer = Trainer(
+            config=config,
+            model=model,
+            train_dataset=train_dataset,
+            val_dataset=val_dataset,
+            output_dir=output_dir
+        )
+        
+        history = trainer.train()
+        
+        click.echo(f"\n===> Training complete! Models saved to {output_dir}")
+        
+    except Exception as e:
+        click.echo(f"/!\ Error: {e}", err=True)
+        raise
+
+
+@cli.command()
+@click.argument("data_root", type=click.Path(exists=True))
+@click.option("--model-path", required=True, help="Path to model.pt file")
+@click.option("--split", default="test", type=click.Choice(["train", "val", "test"]))
+@click.option("--batch-size", default=32)
+@click.option("--threshold", default=0.5, type=float)
+def evaluate(data_root, model_path, split, batch_size, threshold):
+    """Evaluate fine-tuned model"""
+    try:
+        # Load data
+        df = load_dataset_split(os.path.join(data_root, split))
+        
+        # Load predictor
+        predictor = FineTunedPredictor(model_path)
+        
+        # Build texts
+        texts = []
+        for _, row in df.iterrows():
+            text = row["description"].strip() if pd.notna(row["description"]) else ""
+            texts.append(text)
+        
+        # Predict
+        predictions, probs = predictor.predict(texts, threshold, batch_size)
+        
+        # Compute metrics
+        mlb = MultiLabelBinarizer(classes=TARGET_TAGS)
+        mlb.fit([TARGET_TAGS])
+        y_true = mlb.transform(df["tags"])
+        y_pred = (probs >= threshold).astype(int)
+        
+        print("\n" + "="*80)
+        print("EVALUATION RESULTS")
+        print("="*80)
+        print(classification_report(y_true, y_pred, target_names=TARGET_TAGS, zero_division=0))
+        
+        hamming = hamming_loss(y_true, y_pred)
+        _, _, f1_macro, _ = precision_recall_fscore_support(
+            y_true, y_pred, average="macro", zero_division=0
+        )
+        _, _, f1_micro, _ = precision_recall_fscore_support(
+            y_true, y_pred, average="micro", zero_division=0
+        )
+        
+        print(f"\n📊 Summary:")
+        print(f"  Hamming Loss:    {hamming:.4f}")
+        print(f"  F1 (macro):      {f1_macro:.4f}")
+        print(f"  F1 (micro):      {f1_micro:.4f}")
+        print("="*80)
+        
+    except Exception as e:
+        click.echo(f"❌ Error: {e}", err=True)
+        raise
+
+
+if __name__ == "__main__":
+    cli()
