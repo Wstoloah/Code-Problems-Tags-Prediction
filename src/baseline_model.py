@@ -21,6 +21,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer, CountVectorizer
 from sklearn.multiclass import OneVsRestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.neural_network import MLPClassifier
 from xgboost import XGBClassifier
 from sklearn.metrics import (
     hamming_loss, precision_recall_fscore_support,
@@ -34,10 +36,13 @@ TARGET_TAGS = [
     'trees', 'geometry', 'games', 'probabilities'
 ]
 
+# max features number in vectorizer
+MAX_FEATURES_TEXT = 20000 # based on EDA using CountVectorizer and TF-IDF Vectorizer
+
 class FeatureExtractor:
     """Text feature extractor using TF-IDF or CountVectorizer, optional statistical features."""
 
-    def __init__(self, vectorizer_type: str = "tfidf", max_features_text: int = 20000):
+    def __init__(self, vectorizer_type: str = "tfidf", max_features_text: int = MAX_FEATURES_TEXT):
         self.vectorizer_type = vectorizer_type.lower()
         if self.vectorizer_type == "tfidf":
             self.text_vectorizer = TfidfVectorizer(
@@ -80,7 +85,7 @@ class FeatureExtractor:
                 'has_graph_kw': int(any(kw in text_lower for kw in
                                         ['graph', 'node', 'edge', 'vertex', 'tree', 'path', 'cycle'])),
                 'has_graph_algo': int(any(kw in text_lower for kw in
-                                          ['dfs', 'bfs', 'dijkstra', 'shortest path', 'spanning tree'])),
+                                          ['dfs', 'bfs', 'dijkstra', 'shortest path', 'spanning tree', 'graph'])),
 
                 # String indicators
                 'has_string_kw': int(any(kw in text_lower for kw in
@@ -91,7 +96,7 @@ class FeatureExtractor:
                 # Geometry indicators
                 'has_geometry_kw': int(any(kw in text_lower for kw in
                                            ['point', 'line', 'circle', 'triangle', 'polygon', 'distance', 'angle',
-                                            'coordinate'])),
+                                            'coordinate', 'geometry'])),
 
                 # Probability indicators
                 'has_prob_kw': int(any(kw in text_lower for kw in
@@ -108,10 +113,10 @@ class FeatureExtractor:
                 'has_sort': int('sort' in text_lower),
                 'num_functions': text.count('def '),
 
-                # Text statistics
-                'text_length': len(text),
-                'num_numbers': sum(c.isdigit() for c in text),
-                'avg_word_length': np.mean([len(w) for w in text.split()]) if text.split() else 0,
+                # # Text statistics
+                # 'text_length': len(text),
+                # 'num_numbers': sum(c.isdigit() for c in text),
+                # 'avg_word_length': np.mean([len(w) for w in text.split()]) if text.split() else 0,
             }
             features.append(list(feature_dict.values()))
 
@@ -347,16 +352,36 @@ class BaselineTagPredictor:
 
 # classifier choice 
 CLASSIFIERS = {
-    "logistic": lambda: OneVsRestClassifier(LogisticRegression(max_iter=2000), n_jobs=-1),
+    "logistic": lambda: OneVsRestClassifier(
+        LogisticRegression(max_iter=2000),
+        n_jobs=-1
+    ),
     "random_forest": lambda: OneVsRestClassifier(
-        RandomForestClassifier(n_estimators=500, max_depth=10), n_jobs=-1
+        RandomForestClassifier(n_estimators=500, max_depth=10),
+        n_jobs=-1
     ),
     "xgboost": lambda: OneVsRestClassifier(
-        XGBClassifier(n_estimators=200, max_depth=6, use_label_encoder=False, eval_metric='logloss'),
+        XGBClassifier(
+            n_estimators=200, max_depth=6,
+            use_label_encoder=False, eval_metric="logloss"
+        ),
+        n_jobs=-1
+    ),
+    "naive_bayes": lambda: OneVsRestClassifier(
+        MultinomialNB(),
+        n_jobs=-1
+    ),
+    "mlp": lambda: OneVsRestClassifier(
+        MLPClassifier(
+            hidden_layer_sizes=(256, 128),
+            activation="relu",
+            solver="adam",
+            max_iter=30,
+            random_state=42,
+        ),
         n_jobs=-1
     ),
 }
-
 
 # CLI
 @click.group()
