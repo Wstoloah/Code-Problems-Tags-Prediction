@@ -77,7 +77,7 @@ class FeatureExtractor:
             feature_dict = {
                 # Math indicators
                 'has_math_kw': int(any(kw in text_lower for kw in
-                                      ['prime', 'divisor', 'factorial', 'gcd', 'lcm', 'modulo', 'fibonacci'])),
+                                      ['prime', 'divisor', 'factorial', 'gcd', 'lcm', 'modulo', 'fibonacci', 'math'])),
                 'has_formula': int(any(kw in text_lower for kw in
                                        ['formula', 'equation', 'calculate', 'sum', 'product'])),
 
@@ -319,7 +319,61 @@ class BaselineTagPredictor:
             "recall_macro": recall_macro,
             "f1_macro": f1_macro,
         }
-        
+
+    def evaluate_per_tag(self, df, threshold: float = 0.5):
+        """
+        Evaluate model and print per-tag metrics table.
+        Returns detailed metrics per tag.
+        """
+        # Build texts and true labels
+        texts = self._build_texts_from_df(df)
+        y_true = self.transform_labels(df) if hasattr(self, 'mlb') else self.prepare_labels(df)[0]
+
+        # Compute features
+        X = self.feature_extractor.transform(texts)
+
+        # Predict probabilities and threshold
+        y_prob = self.classifier.predict_proba(X)
+        if isinstance(y_prob, list):
+            y_prob = np.vstack([p[:, 1] for p in y_prob]).T
+        y_pred = (y_prob >= threshold).astype(int)
+
+        # Metrics per tag
+        from sklearn.metrics import precision_recall_fscore_support, hamming_loss
+        precision, recall, f1, _ = precision_recall_fscore_support(
+            y_true, y_pred, average=None, zero_division=0
+        )
+        support = y_true.sum(axis=0)
+        predicted_count = y_pred.sum(axis=0)
+
+        # Print table
+        print(f"\n{'Tag':<20}{'Precision':>10}{'Recall':>10}{'F1':>10}{'Support':>10}{'Predicted':>10}")
+        print("="*70)
+        for idx, tag in enumerate(self.TARGET_TAGS):
+            print(f"{tag:<20}{precision[idx]:>10.3f}{recall[idx]:>10.3f}{f1[idx]:>10.3f}{support[idx]:>10d}{predicted_count[idx]:>10d}")
+
+        # Global metrics
+        hamming = hamming_loss(y_true, y_pred)
+        precision_s, recall_s, f1_s, _ = precision_recall_fscore_support(y_true, y_pred, average="samples", zero_division=0)
+        precision_m, recall_m, f1_m, _ = precision_recall_fscore_support(y_true, y_pred, average="macro", zero_division=0)
+
+        print(f"\nHamming Loss: {hamming:.4f}")
+        print(f"Sample-average Precision: {precision_s:.4f}, Recall: {recall_s:.4f}, F1: {f1_s:.4f}")
+        print(f"Macro-average Precision: {precision_m:.4f}, Recall: {recall_m:.4f}, F1: {f1_m:.4f}")
+
+        return {
+            "per_tag": [{"tag": t, "precision": float(p), "recall": float(r), "f1": float(f),
+                        "support": int(s), "predicted": int(pc)}
+                        for t, p, r, f, s, pc in zip(self.TARGET_TAGS, precision, recall, f1, support, predicted_count)],
+            "hamming_loss": float(hamming),
+            "precision_samples": float(precision_s),
+            "recall_samples": float(recall_s),
+            "f1_samples": float(f1_s),
+            "precision_macro": float(precision_m),
+            "recall_macro": float(recall_m),
+            "f1_macro": float(f1_m)
+        }
+
     def save(self, path: str):
         model_data = {
             "feature_extractor": self.feature_extractor,
@@ -493,7 +547,9 @@ def evaluate(data_root, model_path, split, use_stats_features, threshold, log_pa
     y_true, _ = predictor.prepare_labels(df)
 
     click.echo(f"Evaluating {len(df)} examples...\n")
-    metrics = predictor.evaluate(X, y_true, threshold=threshold)
+    # metrics = predictor.evaluate(X, y_true, threshold=threshold)
+    metrics = predictor.evaluate_per_tag(df, threshold=threshold)
+
 
     # Log results
     classifier_name = type(predictor.classifier.estimator).__name__ if predictor.classifier is not None else "None"
