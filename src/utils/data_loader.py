@@ -2,24 +2,36 @@ import os
 import json
 import pandas as pd
 
-# Default tags we care about
+
+import os
+import json
+import pandas as pd
 
 def load_dataset_split(split_dir):
     """
-    Load all .json files in a given split directory (train/val/test).
-    Combines problem description + code and filters by target tags.
-    
+    Load all .json files in a given split directory (train/val/test),
+    combining problem description + code and filtering by target tags.
+    If a cached CSV already exists, load it instead to save time.
+
     Args:
         split_dir (str): Path to directory containing .json samples.
 
     Returns:
-        pd.DataFrame with columns ['text', 'tags']
+        pd.DataFrame with columns ['description', 'code', 'tags']
     """
-    samples = []
-
     if not os.path.exists(split_dir):
         raise FileNotFoundError(f" XXX ==== Directory not found: {split_dir} ====")
 
+    # --- Define cache file path ---
+    csv_path = os.path.join(split_dir, "cached_dataset.csv")
+
+    # --- If cached CSV exists, just load and return it ---
+    if os.path.exists(csv_path):
+        print(f" ===> Loading cached dataset from {csv_path}")
+        return pd.read_csv(csv_path, converters={"tags": eval})  # convert string repr of list back to list
+
+    # --- Otherwise, build dataset from JSON files ---
+    samples = []
     for fname in os.listdir(split_dir):
         if not fname.endswith(".json"):
             continue
@@ -29,7 +41,7 @@ def load_dataset_split(split_dir):
             with open(fpath, "r", encoding="utf-8") as f:
                 sample = json.load(f)
         except json.JSONDecodeError:
-            print(f" /!\ ==== Skipping invalid JSON file: {fpath} ====")
+            print(f"/!\ Skipping invalid JSON file: {fpath}")
             continue
 
         desc = sample.get("prob_desc_description", "") or ""
@@ -45,7 +57,14 @@ def load_dataset_split(split_dir):
 
     df = pd.DataFrame(samples)
     print(f"==== Loaded {len(df)} samples from {split_dir} ====")
+
+    # --- Save to cache for future use ---
+    if len(df) > 0:
+        df.to_csv(csv_path, index=False)
+        print(f"Cached dataset saved to {csv_path}")
+
     return df
+
 
 
 def load_all_splits(data_root):
