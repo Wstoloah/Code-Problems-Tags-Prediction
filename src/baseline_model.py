@@ -152,7 +152,7 @@ class BaselineTagPredictor:
     """Multi-label classifier for algorithm problem tags"""
 
     def __init__(self, target_tags: Optional[List[str]] = None,
-                 classifier=None, vectorizer_type: str = "tfidf", use_code: bool = False):
+                 classifier=None, vectorizer_type: str = "tfidf", use_code: bool = False, use_stats_features: bool = False):
         """
         Args:
             target_tags: list of tags to train/predict (columns order).
@@ -165,6 +165,7 @@ class BaselineTagPredictor:
         self.embedding_name = vectorizer_type.upper() + (("+CODE") if use_code else "")
         self.classifier = classifier
         self.use_code = use_code
+        self.use_stats_features = use_stats_features
         self.all_tags = None  # all tags seen in dataset (kept for EDA / future use)
         self.tag_to_idx = None
         self.idx_to_tag = None
@@ -207,8 +208,7 @@ class BaselineTagPredictor:
         else:
             return [d.strip() for d in descs]
 
-    def train(self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None,
-              use_stats_features: bool = False):
+    def train(self, train_df: pd.DataFrame, val_df: Optional[pd.DataFrame] = None):
         """Train the classifier on training DataFrame (keeps samples even if no TARGET_TAGS)."""
         print("==== Preparing data... ====")
 
@@ -228,7 +228,7 @@ class BaselineTagPredictor:
             print(f"  {tag:<20} {count:>5} ({count/len(train_df)*100:.1f}%)")
 
         print("\n==== Extracting features... ====")
-        X_train = self.feature_extractor.fit_transform(train_texts, use_stats_features=use_stats_features)
+        X_train = self.feature_extractor.fit_transform(train_texts, use_stats_features=self.use_stats_features)
         print(f"==== Feature vector size: {X_train.shape[1]} ====")
 
         # Default classifier fallback
@@ -250,16 +250,16 @@ class BaselineTagPredictor:
             print("\n==== Evaluation on validation set: ====")
             val_texts = self._build_texts_from_df(val_df)
             y_val, _ = self.prepare_labels(val_df)
-            X_val = self.feature_extractor.transform(val_texts, use_stats_features=use_stats_features)
+            X_val = self.feature_extractor.transform(val_texts, use_stats_features=self.use_stats_features)
             self.evaluate(X_val, y_val)
 
         return X_train, y_train
 
-    def predict(self, texts: List[str], threshold: float = 0.5, use_stats_features: bool = False) -> List[List[str]]:
+    def predict(self, texts: List[str], threshold: float = 0.5) -> List[List[str]]:
         """Predict tags for raw text inputs (list of strings). Returns list of predicted target tags."""
         if self.classifier is None:
             raise ValueError("Model must be trained before prediction")
-        X = self.feature_extractor.transform(texts, use_stats_features=use_stats_features)
+        X = self.feature_extractor.transform(texts, use_stats_features=self.use_stats_features)
         y_prob = self.classifier.predict_proba(X)
 
         predictions = []
@@ -268,14 +268,14 @@ class BaselineTagPredictor:
             predictions.append(pred_tags)
         return predictions
 
-    def predict_from_df(self, df: pd.DataFrame, threshold: float = 0.5, use_stats_features: bool = False) -> List[List[str]]:
+    def predict_from_df(self, df: pd.DataFrame, threshold: float = 0.5) -> List[List[str]]:
         texts = self._build_texts_from_df(df)
-        return self.predict(texts, threshold=threshold, use_stats_features=use_stats_features)
+        return self.predict(texts, threshold=threshold, use_stats_features=self.use_stats_features)
 
-    def predict_proba(self, texts: List[str], use_stats_features: bool = False) -> np.ndarray:
+    def predict_proba(self, texts: List[str]) -> np.ndarray:
         if self.classifier is None:
             raise ValueError("Model must be trained before prediction")
-        X = self.feature_extractor.transform(texts, use_stats_features=use_stats_features)
+        X = self.feature_extractor.transform(texts, use_stats_features=self.use_stats_features)
         return self.classifier.predict_proba(X)
 
     def evaluate(self, X, y_true, threshold: float = 0.5):
@@ -320,17 +320,11 @@ class BaselineTagPredictor:
             "f1_macro": f1_macro,
         }
 
-    def evaluate_per_tag(self, df, threshold: float = 0.5):
+    def evaluate_per_tag(self, X, y_true, threshold: float = 0.5):
         """
         Evaluate model and print per-tag metrics table.
         Returns detailed metrics per tag.
         """
-        # Build texts and true labels
-        texts = self._build_texts_from_df(df)
-        y_true = self.transform_labels(df) if hasattr(self, 'mlb') else self.prepare_labels(df)[0]
-
-        # Compute features
-        X = self.feature_extractor.transform(texts)
 
         # Predict probabilities and threshold
         y_prob = self.classifier.predict_proba(X)
@@ -384,6 +378,7 @@ class BaselineTagPredictor:
             "TARGET_TAGS": self.TARGET_TAGS,
             "embedding_name": self.embedding_name,
             "use_code": self.use_code,
+            "use_stats_features": self.use_stats_features
         }
         os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
         with open(path, "wb") as f:
@@ -401,6 +396,7 @@ class BaselineTagPredictor:
         self.TARGET_TAGS = model_data.get("TARGET_TAGS", self.TARGET_TAGS)
         self.embedding_name = model_data.get("embedding_name", getattr(self, "embedding_name", "TFIDF"))
         self.use_code = model_data.get("use_code", getattr(self, "use_code", False))
+        self.use_stats_features = model_data.get("use_stats_features", getattr(self, "use_code", False))
         print(f"==== Model loaded from {path} (embedding={self.embedding_name}, use_code={self.use_code})")
 
 
@@ -455,7 +451,7 @@ def cli():
 @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
 def train(data_root, classifier, model_path, use_val, use_stats_features, vectorizer, use_code):
     """Train the tag prediction model"""
-    click.echo(f"==== Training Tag Predictor ({classifier}, vectorizer={vectorizer.upper()}, use_code={use_code}) ====\n")
+    click.echo(f"==== Training Tag Predictor ({classifier}, vectorizer={vectorizer.upper()}, use_code={use_code}), use_stats_features={use_stats_features} ====\n")
 
     # Load data (expects JSONs with fields: description, code, original_tags / tags)
     train_df, val_df, _ = load_all_splits(data_root)
@@ -467,7 +463,7 @@ def train(data_root, classifier, model_path, use_val, use_stats_features, vector
 
     # Initialize classifier and predictor
     clf = CLASSIFIERS[classifier]()
-    predictor = BaselineTagPredictor(classifier=clf, vectorizer_type=vectorizer, use_code=use_code)
+    predictor = BaselineTagPredictor(classifier=clf, vectorizer_type=vectorizer, use_code=use_code, use_stats_features=use_stats_features)
 
     if use_val and val_df is not None:
         predictor.train(train_df, val_df=val_df, use_stats_features=use_stats_features)
@@ -482,16 +478,16 @@ def train(data_root, classifier, model_path, use_val, use_stats_features, vector
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--model-path', default='models/baseline_model.pkl', help='Path to the trained model')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
-@click.option('--use-stats-features', is_flag=True, help='Use statistical features during prediction')
+# @click.option('--use-stats-features', is_flag=True, help='Use statistical features during prediction')
 @click.option('--output', default='predictions.json')
 @click.option('--threshold', default=0.5)
-@click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
-@click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
-def predict(data_root, model_path, split, use_stats_features, output, threshold, vectorizer, use_code):
+# @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
+# @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
+def predict(data_root, model_path, split, output, threshold):
     """Predict tags for problems in a dataset split"""
     click.echo(f"==== Predicting Tags on {split} set ====\n")
 
-    predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
+    predictor = BaselineTagPredictor()#vectorizer_type=vectorizer, use_code=use_code)
     predictor.load(model_path)
 
     df = load_dataset_split(os.path.join(data_root, split))
@@ -500,7 +496,7 @@ def predict(data_root, model_path, split, use_stats_features, output, threshold,
 
     click.echo(f"Making predictions on {len(df)} examples...")
     start = time.time()
-    predictions = predictor.predict(texts, threshold=threshold, use_stats_features=use_stats_features)
+    predictions = predictor.predict(texts, threshold=threshold)
     elapsed = time.time() - start
 
     # Save results
@@ -527,29 +523,28 @@ def predict(data_root, model_path, split, use_stats_features, output, threshold,
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--model-path', default='models/baseline_model.pkl')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
-@click.option('--use-stats-features', is_flag=True, help='Include statistical features')
+# @click.option('--use-stats-features', is_flag=True, help='Include statistical features')
 @click.option('--threshold', default=0.5)
 @click.option('--log-path', default='results.md', help='Path to the markdown results log')
 @click.option('--notes', default='', help='Optional notes for this experiment')
-@click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
-@click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
-def evaluate(data_root, model_path, split, use_stats_features, threshold, log_path, notes, vectorizer, use_code):
+# @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
+# @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
+def evaluate(data_root, model_path, split, threshold, log_path, notes):
     """Evaluate model on a dataset split"""
     click.echo(f"==== Evaluating on {split} set ====\n")
 
-    predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
+    predictor = BaselineTagPredictor()
     predictor.load(model_path)
 
     df = load_dataset_split(os.path.join(data_root, split))
     texts = predictor._build_texts_from_df(df)
 
-    X = predictor.feature_extractor.transform(texts, use_stats_features)
+    X = predictor.feature_extractor.transform(texts, predictor.use_stats_features)
     y_true, _ = predictor.prepare_labels(df)
 
     click.echo(f"Evaluating {len(df)} examples...\n")
     # metrics = predictor.evaluate(X, y_true, threshold=threshold)
-    metrics = predictor.evaluate_per_tag(df, threshold=threshold)
-
+    metrics = predictor.evaluate_per_tag(X, y_true, threshold=threshold)
 
     # Log results
     classifier_name = type(predictor.classifier.estimator).__name__ if predictor.classifier is not None else "None"
@@ -572,21 +567,21 @@ def evaluate(data_root, model_path, split, use_stats_features, threshold, log_pa
 @cli.command()
 @click.argument('text', type=str)
 @click.option('--model-path', default='models/baseline_model.pkl')
-@click.option('--use-stats-features', is_flag=True, help='Include statistical features')
+# @click.option('--use-stats-features', is_flag=True, help='Include statistical features')
 @click.option('--threshold', default=0.5)
-@click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
-@click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
-def predict_one(text, model_path, use_stats_features, threshold, vectorizer, use_code):
-    """Predict tags for a single problem description"""
-    click.echo(f"==== Predicting single sample (vectorizer={vectorizer}, use_code={use_code}) ====\n")
-
-    predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
+# @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
+# @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
+def predict_one(text, model_path, threshold):
+    """Predict tags for a single problem description,
+    If user needs to include code, they can pass a combined string "desc\n\n<CODE>"
+    """
+    predictor = BaselineTagPredictor()
     predictor.load(model_path)
 
-    # Build text (if user wants to pass description only, that works)
-    # If user needs to include code, they can pass a combined string "desc\n\n<CODE>"
+    click.echo(f"==== Predicting single sample (vectorizer={predictor.vectorizer}, use_code={predictor.use_code}), use_stats_features={predictor.use_stats_features} ====\n")
+
     start = time.time()
-    pred_tags = predictor.predict([text], threshold=threshold, use_stats_features=use_stats_features)[0]
+    pred_tags = predictor.predict([text], threshold=threshold, use_stats_features=predictor.use_stats_features)[0]
     elapsed = time.time() - start
 
     click.echo(f"Predicted tags: {pred_tags}")
