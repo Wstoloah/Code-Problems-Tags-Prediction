@@ -8,3 +8,6 @@ pytest
 sentence-transformers
 click
 xgboost
+matplotlib
+seaborn
+peft
