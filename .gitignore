@@ -10,3 +10,6 @@ data/*
 
 # Virtual env
 venv
+
+# Embeddings cache
+cache_codebert/*
