@@ -162,7 +162,7 @@ class BaselineTagPredictor:
         """
         self.TARGET_TAGS = target_tags or TARGET_TAGS
         self.feature_extractor = FeatureExtractor(vectorizer_type=vectorizer_type)
-        self.embedding_name = vectorizer_type.upper() + (("+CODE") if use_code else "")
+        self.embedding_name = vectorizer_type.upper()
         self.classifier = classifier
         self.use_code = use_code
         self.use_stats_features = use_stats_features
@@ -466,9 +466,9 @@ def train(data_root, classifier, model_path, use_val, use_stats_features, vector
     predictor = BaselineTagPredictor(classifier=clf, vectorizer_type=vectorizer, use_code=use_code, use_stats_features=use_stats_features)
 
     if use_val and val_df is not None:
-        predictor.train(train_df, val_df=val_df, use_stats_features=use_stats_features)
+        predictor.train(train_df, val_df=val_df)
     else:
-        predictor.train(train_df, use_stats_features=use_stats_features)
+        predictor.train(train_df)
 
     predictor.save(model_path)
     click.echo(f"\n==== Training complete! Model saved to {model_path} ====")
@@ -478,11 +478,8 @@ def train(data_root, classifier, model_path, use_val, use_stats_features, vector
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--model-path', default='models/baseline_model.pkl', help='Path to the trained model')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
-# @click.option('--use-stats-features', is_flag=True, help='Use statistical features during prediction')
 @click.option('--output', default='predictions.json')
 @click.option('--threshold', default=0.5)
-# @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
-# @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
 def predict(data_root, model_path, split, output, threshold):
     """Predict tags for problems in a dataset split"""
     click.echo(f"==== Predicting Tags on {split} set ====\n")
@@ -523,12 +520,9 @@ def predict(data_root, model_path, split, output, threshold):
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--model-path', default='models/baseline_model.pkl')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
-# @click.option('--use-stats-features', is_flag=True, help='Include statistical features')
 @click.option('--threshold', default=0.5)
 @click.option('--log-path', default='results.md', help='Path to the markdown results log')
 @click.option('--notes', default='', help='Optional notes for this experiment')
-# @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
-# @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
 def evaluate(data_root, model_path, split, threshold, log_path, notes):
     """Evaluate model on a dataset split"""
     click.echo(f"==== Evaluating on {split} set ====\n")
@@ -554,6 +548,8 @@ def evaluate(data_root, model_path, split, threshold, log_path, notes):
     logger.log_result(
         model_name="BaselineTagPredictor",
         embedding=embedding_name,
+        use_code=int(predictor.use_code),
+        use_stats_features=int(predictor.use_stats_features),
         classifier=classifier_name,
         dataset=split,
         metrics=metrics,
@@ -567,10 +563,7 @@ def evaluate(data_root, model_path, split, threshold, log_path, notes):
 @cli.command()
 @click.argument('text', type=str)
 @click.option('--model-path', default='models/baseline_model.pkl')
-# @click.option('--use-stats-features', is_flag=True, help='Include statistical features')
 @click.option('--threshold', default=0.5)
-# @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
-# @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
 def predict_one(text, model_path, threshold):
     """Predict tags for a single problem description,
     If user needs to include code, they can pass a combined string "desc\n\n<CODE>"
