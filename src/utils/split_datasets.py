@@ -89,7 +89,7 @@ def copy_and_save_json(files, all_tags_map, filtered_tags_map, dest_dir):
     Copy selected JSON files into destination directory.
     Each output JSON includes:
       - original tags
-      - filtered target tags (for your ML pipeline)
+      - filtered target tags
     """
     os.makedirs(dest_dir, exist_ok=True)
     for fn in tqdm(files, desc=f"Copying to {os.path.basename(dest_dir)}"):
