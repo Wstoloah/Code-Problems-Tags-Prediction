@@ -11,8 +11,8 @@ from pathlib import Path
 from typing import List, Dict, Tuple, Optional
 import warnings
 
-from utils.logger import ExperimentLogger
-from utils.data_loader import load_all_splits, load_dataset_split
+from src.utils.logger import ExperimentLogger
+from src.utils.data_loader import load_all_splits, load_dataset_split
 warnings.filterwarnings('ignore')
 
 import numpy as np

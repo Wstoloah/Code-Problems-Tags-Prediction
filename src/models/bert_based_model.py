@@ -28,8 +28,8 @@ from sklearn.multiclass import OneVsRestClassifier
 from sklearn.metrics import classification_report, hamming_loss, precision_recall_fscore_support
 from transformers import AutoTokenizer, AutoModel
 
-from utils.data_loader import load_all_splits, load_dataset_split
-from utils.logger import ExperimentLogger
+from src.utils.data_loader import load_all_splits, load_dataset_split
+from src.utils.logger import ExperimentLogger
 
 # Config
 TARGET_TAGS = [

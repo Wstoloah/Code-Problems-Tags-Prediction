@@ -41,8 +41,8 @@ from transformers import (
 # Accelerate for multi-GPU
 from accelerate import Accelerator
 
-from utils.data_loader import load_all_splits, load_dataset_split
-from utils.logger import ExperimentLogger
+from src.utils.data_loader import load_all_splits, load_dataset_split
+from src.utils.logger import ExperimentLogger
 
 warnings.filterwarnings('ignore')
 

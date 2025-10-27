@@ -12,8 +12,8 @@ from sklearn.preprocessing import MultiLabelBinarizer
 from sklearn.metrics import classification_report, f1_score
 from xgboost import XGBClassifier
 
-from utils.data_loader import load_all_splits, load_dataset_split
-from utils.logger import ExperimentLogger
+from src.utils.data_loader import load_all_splits, load_dataset_split
+from src.utils.logger import ExperimentLogger
 from models.baseline_model import BaselineTagPredictor, TARGET_TAGS
 
 # Config

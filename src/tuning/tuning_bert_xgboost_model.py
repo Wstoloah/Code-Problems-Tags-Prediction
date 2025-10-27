@@ -9,8 +9,8 @@ from xgboost import XGBClassifier
 from tqdm import tqdm
 from contextlib import contextmanager
 
-from utils.data_loader import load_all_splits, load_dataset_split
-from utils.logger import ExperimentLogger
+from src.utils.data_loader import load_all_splits, load_dataset_split
+from src.utils.logger import ExperimentLogger
 from models.bert_based_model import TagPredictor, TARGET_TAGS, MODEL_CONFIGS
 
 # Config
