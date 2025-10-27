@@ -58,7 +58,7 @@ class Embedder:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name).to(self.device)
         self.model.eval()
-        self.cache_dir = cache_dir
+        self.cache_dir = str(cache_dir)
         os.makedirs(self.cache_dir, exist_ok=True)
 
     def _cache_path(self, key: str) -> str:
@@ -138,7 +138,8 @@ class TagPredictor:
             if model_name not in MODEL_CONFIGS:
                 raise ValueError(f"Unknown model: {model_name}")
             self.model_name = model_name
-            self.embedder = Embedder(MODEL_CONFIGS[model_name]['model_name'], cache_dir=cache_dir+"_"+model_name)
+            model_cache_dir = os.path.join(cache_dir, model_name)
+            self.embedder = Embedder(MODEL_CONFIGS[model_name]['model_name'], cache_dir=model_cache_dir)
             self.max_length = MODEL_CONFIGS[model_name]['max_length']
             self.mlb = MultiLabelBinarizer(classes=TARGET_TAGS)
 
@@ -357,7 +358,7 @@ def cli():
 @click.argument("data_root", type=click.Path(exists=True))
 @click.option("--model", type=click.Choice(["codebert", "modernbert"]), default="codebert")
 @click.option("--classifier", type=click.Choice(["logistic", "random_forest", "xgboost", "naive_bayes", "mlp"]), default="logistic")
-@click.option("--model-path", default="models/embedding_model.pkl")
+@click.option("--model-path", default="models/bert_based/embedding_model.pkl")
 @click.option("--batch-size", default=8)
 @click.option("--use-code", is_flag=True)
 @click.option("--use-cache", is_flag=True)
@@ -376,7 +377,8 @@ def train(data_root, model, classifier, model_path, batch_size, use_code, use_ca
 @click.option("--threshold", default=0.5, help="Threshold for tag prediction")
 @click.option('--notes', default='', help='Optional notes for this experiment')
 @click.option("--use-cache", is_flag=True, help= "Embeddings loading from/to cache")
-def evaluate(data_root, split, model_path, batch_size, threshold, notes, use_cache):
+@click.option('--log-path', default='outputs/logs/results.md', help='Path to the markdown results log')
+def evaluate(data_root, split, model_path, batch_size, threshold, notes, use_cache, log_path):
     """Evaluate model on a dataset split"""
     click.echo(f"==== Evaluating on {split} set ====\n")
     predictor = TagPredictor()
@@ -398,7 +400,7 @@ def evaluate(data_root, split, model_path, batch_size, threshold, notes, use_cac
     classifier_name = type(predictor.classifier.estimator).__name__ if predictor.classifier is not None else "None"
     embedding_name = predictor.model_name
 
-    logger = ExperimentLogger("results.md")
+    logger = ExperimentLogger(log_path)
     logger.log_result(
         model_name=predictor.model_name+"BasedTagPredictor",
         embedding=embedding_name,
@@ -418,7 +420,7 @@ def evaluate(data_root, split, model_path, batch_size, threshold, notes, use_cac
 @click.argument("data_root", type=click.Path(exists=True))
 @click.option("--model-path", default="models/embedding_model.pkl")
 @click.option("--split", default="test", type=click.Choice(["train", "val", "test"]))
-@click.option("--output", default="predictions_embedding.json")
+@click.option("--output", default="outputs/predictions/predictions_embedding.json")
 @click.option("--threshold", default=0.5, help="Threshold for tag prediction")
 @click.option("--batch-size", default=8, type=int, help="Batch size for encoding (default: 8)")
 @click.option("--use-cache", is_flag=True, help= "Embeddings loading from/to cache")

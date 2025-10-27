@@ -206,7 +206,6 @@ class DataCollatorWithPaddingMultiLabel:
         return batch
 
 # Training Configuration
-
 class TrainingConfig:
     """Training hyperparameters"""
     
@@ -243,11 +242,10 @@ class TrainingConfig:
     def to_dict(self):
         return vars(self)
 
-
 # Main Training Function
 def main(
     data_root: str,
-    output_dir: str = "models/lora_codebert",
+    output_dir: str = "models/finetuned/lora_codebert",
     config: Optional[TrainingConfig] = None
 ):
     """
@@ -679,7 +677,7 @@ def cli():
 
 @cli.command()
 @click.argument("data_root", type=click.Path(exists=True))
-@click.option("--output-dir", default="models/lora_modernbert")
+@click.option("--output-dir", default="models/finetuned/lora_modernbert")
 @click.option("--model-type", type=click.Choice(["modernbert", "codebert"]), default="modernbert")
 @click.option("--epochs", default=10)
 @click.option("--batch-size", default=16)
@@ -708,11 +706,12 @@ def train(data_root, output_dir, model_type, epochs, batch_size, learning_rate,
 @cli.command()
 @click.argument("data_root", type=click.Path(exists=True))
 @click.option("--model-dir", required=True)
-@click.option("--split", default="test")
+@click.option("--split", default="val")
 @click.option("--threshold", default=0.5, help="Threshold for tag prediction")
 @click.option("--batch-size", default=None, type=int, help="Batch size for prediction (default: 16)")
 @click.option('--notes', default='', help='Optional notes for this experiment')
-def evaluate(data_root, model_dir, split, threshold, batch_size, notes):
+@click.option('--log-path', default='outputs/logs/results.md', help='Path to the markdown results log')
+def evaluate(data_root, model_dir, split, threshold, batch_size, notes, log_path):
     """Evaluate LoRA model. Parameters like use_code are loaded from the saved model."""
     click.echo(f"==== Evaluating on {split} set ====\n")
     
@@ -789,7 +788,7 @@ def evaluate(data_root, model_dir, split, threshold, batch_size, notes):
     print("="*70)
     
     # Log results if notes provided
-    logger = ExperimentLogger("results.md")
+    logger = ExperimentLogger(log_path)
         
     metrics = {
         "per_tag": [{"tag": t, "precision": float(p), "recall": float(r), "f1": float(f),
