@@ -11,5 +11,8 @@ data/*
 # Virtual env
 venv
 
-# Embeddings cache
-cache_codebert/*
+# Ignore results
+results/*
+
+# Ignore executable package 
+*.egg-info
