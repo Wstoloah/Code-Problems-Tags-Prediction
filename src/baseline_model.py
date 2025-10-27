@@ -219,13 +219,13 @@ class BaselineTagPredictor:
         print(f"===> Training set: {len(train_df)} examples, {len(tags)} tags (target tags)")
         print(f"===> Target tags present in dataset: {sum(y_train.sum(axis=0) > 0)}/{len(tags)}")
 
-        # Tag distribution (for target tags only)
-        tag_counts = y_train.sum(axis=0)
-        print("\n==== Tag distribution (Target tags): ====")
-        for tag in self.TARGET_TAGS:
-            idx = self.tag_to_idx[tag]
-            count = int(tag_counts[idx])
-            print(f"  {tag:<20} {count:>5} ({count/len(train_df)*100:.1f}%)")
+        # # Tag distribution (for target tags only)
+        # tag_counts = y_train.sum(axis=0)
+        # print("\n==== Tag distribution (Target tags): ====")
+        # for tag in self.TARGET_TAGS:
+        #     idx = self.tag_to_idx[tag]
+        #     count = int(tag_counts[idx])
+        #     print(f"  {tag:<20} {count:>5} ({count/len(train_df)*100:.1f}%)")
 
         print("\n==== Extracting features... ====")
         X_train = self.feature_extractor.fit_transform(train_texts, use_stats_features=self.use_stats_features)
