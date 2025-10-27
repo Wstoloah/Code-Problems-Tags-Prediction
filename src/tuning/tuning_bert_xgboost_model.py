@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 from utils.data_loader import load_all_splits, load_dataset_split
 from utils.logger import ExperimentLogger
-from bert_based_model import TagPredictor, TARGET_TAGS, MODEL_CONFIGS
+from models.bert_based_model import TagPredictor, TARGET_TAGS, MODEL_CONFIGS
 
 # Config
 DEFAULT_PARAM_GRID = {
@@ -131,7 +131,7 @@ def cli():
 
 @cli.command()
 @click.argument("data_root", type=click.Path(exists=True))
-@click.option("--model-out", default="models/bert_xgb_tuned.pkl", help="Where to save the trained model")
+@click.option("--model-out", default="models/bert_based/tuned/bert_xgb_tuned.pkl", help="Where to save the trained model")
 @click.option("--bert-model", type=click.Choice(["modernbert", "codebert"]), default="modernbert")
 @click.option("--use-code", is_flag=True, help="Include code snippets in the input")
 @click.option("--batch-size", default=8, help="Batch size for BERT encoding")

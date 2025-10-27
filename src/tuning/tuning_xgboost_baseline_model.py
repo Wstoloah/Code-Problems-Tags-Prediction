@@ -14,7 +14,7 @@ from xgboost import XGBClassifier
 
 from utils.data_loader import load_all_splits, load_dataset_split
 from utils.logger import ExperimentLogger
-from baseline_model import BaselineTagPredictor, TARGET_TAGS
+from models.baseline_model import BaselineTagPredictor, TARGET_TAGS
 
 # Config
 DEFAULT_PARAM_GRID = {
@@ -124,7 +124,7 @@ def cli():
 
 @cli.command()
 @click.argument("data_root", type=click.Path(exists=True))
-@click.option("--model-out", default="models/xgb_tuned_model.pkl", help="Where to save the trained model.")
+@click.option("--model-out", default="models/baseline/tuned/xgb_tuned_model.pkl", help="Where to save the trained model.")
 @click.option("--use-code", is_flag=True, help="Include code snippets in the input.")
 @click.option("--vectorizer", type=click.Choice(["tfidf", "count"]), default="tfidf")
 @click.option("--n-iter", default=50, help="Number of parameter search iterations.")
