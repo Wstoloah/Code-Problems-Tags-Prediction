@@ -125,7 +125,17 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 4. (Optional) Configure Accelerate for GPU Training
+### 4. Install Package in Editable Mode
+
+To make the `src` module importable from anywhere in the project:
+
+```powershell
+pip install -e .
+```
+
+This installs the package in development/editable mode, allowing you to use imports like `from src.utils.logger import ExperimentLogger` throughout the codebase.
+
+### 5. (Optional) Configure Accelerate for GPU Training
 
 If you plan to use LoRA fine-tuning with GPU:
 
