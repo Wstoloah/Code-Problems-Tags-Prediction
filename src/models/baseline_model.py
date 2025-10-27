@@ -190,7 +190,6 @@ class BaselineTagPredictor:
                     y[i, self.tag_to_idx[t]] = 1
         return y, self.TARGET_TAGS
 
-
     # Helper to build text features (description +/- code)
     def _build_texts_from_df(self, df: pd.DataFrame) -> List[str]:
         """
@@ -444,7 +443,7 @@ def cli():
 @click.argument('data_root', type=click.Path(exists=True))
 @click.option('--classifier', type=click.Choice(list(CLASSIFIERS.keys())), default='logistic',
               help='Which classifier to use for training')
-@click.option('--model-path', default='models/baseline_model.pkl', help='Path to save the trained model')
+@click.option('--model-path', default='models/baseline/baseline_model.pkl', help='Path to save the trained model')
 @click.option('--use-val', is_flag=True, help='Use validation set for evaluation during training')
 @click.option('--use-stats-features', is_flag=True, help='Include statistical features in training')
 @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
@@ -476,15 +475,15 @@ def train(data_root, classifier, model_path, use_val, use_stats_features, vector
 
 @cli.command()
 @click.argument('data_root', type=click.Path(exists=True))
-@click.option('--model-path', default='models/baseline_model.pkl', help='Path to the trained model')
+@click.option('--model-path', default='models/baseline/baseline_model.pkl', help='Path to the trained model')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
-@click.option('--output', default='predictions.json')
+@click.option('--output', default='outputs/predictions/predictions.json')
 @click.option('--threshold', default=0.5)
 def predict(data_root, model_path, split, output, threshold):
     """Predict tags for problems in a dataset split"""
     click.echo(f"==== Predicting Tags on {split} set ====\n")
 
-    predictor = BaselineTagPredictor()#vectorizer_type=vectorizer, use_code=use_code)
+    predictor = BaselineTagPredictor()
     predictor.load(model_path)
 
     df = load_dataset_split(os.path.join(data_root, split))
@@ -521,7 +520,7 @@ def predict(data_root, model_path, split, output, threshold):
 @click.option('--model-path', default='models/baseline_model.pkl')
 @click.option('--split', default='test', type=click.Choice(['train', 'val', 'test']))
 @click.option('--threshold', default=0.5)
-@click.option('--log-path', default='results.md', help='Path to the markdown results log')
+@click.option('--log-path', default='outputs/logs/results.md', help='Path to the markdown results log')
 @click.option('--notes', default='', help='Optional notes for this experiment')
 def evaluate(data_root, model_path, split, threshold, log_path, notes):
     """Evaluate model on a dataset split"""
@@ -562,7 +561,7 @@ def evaluate(data_root, model_path, split, threshold, log_path, notes):
 
 @cli.command()
 @click.argument('text', type=str)
-@click.option('--model-path', default='models/baseline_model.pkl')
+@click.option('--model-path', default='models/baseline/baseline_model.pkl')
 @click.option('--threshold', default=0.5)
 def predict_one(text, model_path, threshold):
     """Predict tags for a single problem description,
