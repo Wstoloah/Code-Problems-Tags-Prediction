@@ -1,6 +1,8 @@
 import os
 import click
 import joblib
+from tqdm import tqdm
+from contextlib import contextmanager
 import numpy as np
 import pandas as pd
 from scipy.sparse import hstack, csr_matrix
@@ -27,7 +29,6 @@ DEFAULT_PARAM_GRID = {
 
 
 # Train and Tune
-
 def tune_and_train(
     data_root,
     model_out,
@@ -61,18 +62,43 @@ def tune_and_train(
     X_train = predictor.feature_extractor.fit_transform(train_texts, use_stats_features=use_stats)
     X_val = predictor.feature_extractor.transform(val_texts, use_stats_features=use_stats)
     
-    # Randomized Search
+    # Progress helper: context manager to patch joblib's BatchCompletionCallBack so
+    # it updates a tqdm bar when jobs complete. This makes RandomizedSearchCV
+    # progress visible when n_jobs != 1.
+    @contextmanager
+    def tqdm_joblib(tqdm_object):
+        """Context manager to patch joblib to report into tqdm progress bar."""
+        old_batch_callback = joblib.parallel.BatchCompletionCallBack
+
+        class TqdmBatchCompletionCallback(joblib.parallel.BatchCompletionCallBack):
+            def __call__(self, *args, **kwargs):
+                tqdm_object.update(n=1)
+                return super().__call__(*args, **kwargs)
+
+        joblib.parallel.BatchCompletionCallBack = TqdmBatchCompletionCallback
+        try:
+            yield tqdm_object
+        finally:
+            joblib.parallel.BatchCompletionCallBack = old_batch_callback
+
+    # Randomized Search with progress bar
     base_clf = OneVsRestClassifier(XGBClassifier(eval_metric="logloss"), n_jobs=-1)
+    cv = 3
     search = RandomizedSearchCV(
         base_clf,
         DEFAULT_PARAM_GRID,
-        cv=3,
+        cv=cv,
         n_iter=n_iter,
         scoring="f1_macro",  # macro-F1 treats all labels equally (better for unbalanced multilabel)
         n_jobs=-1,
         verbose=1,
     )
-    search.fit(X_train, Y_train)
+
+    # Show progress: total jobs ~ n_iter * cv (each candidate evaluated on 'cv' folds)
+    total_jobs = int(n_iter) * int(cv)
+    with tqdm(total=total_jobs, desc="RandomizedSearchCV jobs", unit="job") as pbar:
+        with tqdm_joblib(pbar):
+            search.fit(X_train, Y_train)
 
     # Log training results
     best_params = search.best_params_
@@ -106,77 +132,6 @@ def cli():
 def train(data_root, model_out, use_code, vectorizer, n_iter, use_stats_features):
     """Train and tune the tag predictor with hyperparameter search."""
     tune_and_train(data_root, model_out, use_code, vectorizer, n_iter, use_stats_features)
-
-
-# @cli.command()
-# @click.argument("data_root", type=click.Path(exists=True))
-# @click.option("--model-path", default="models/xgb_tuned_model.pkl")
-# @click.option("--split", default="test", type=click.Choice(["train", "val", "test"]))
-# @click.option("--threshold", default=0.5)
-# @click.option('--use-stats-features', is_flag=True, help='Include statistical features in training')
-# @click.option('--notes', default='', help='Optional notes for this experiment')
-# @click.option('--vectorizer', type=click.Choice(['tfidf', 'count']), default='tfidf', help='Text embedding type')
-# @click.option('--use-code', is_flag=True, help='Include code field concatenated with description as feature')
-# def evaluate(data_root, model_path, split, threshold, use_stats_features, notes, vectorizer, use_code):
-#     """Evaluate the model on a given dataset split."""
-#     predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
-#     predictor.load(model_path)
-
-#     df = load_dataset_split(os.path.join(data_root, split))
-#     texts = predictor._build_texts_from_df(df)
-
-#     X = predictor.feature_extractor.transform(texts, use_stats_features)
-#     y_true, _ = predictor.prepare_labels(df)
-
-#     click.echo(f"Evaluating {len(df)} examples...\n")
-
-#     metrics = predictor.evaluate_per_tag(X, y_true, threshold=threshold)
-    
-#     # Log results
-#     logger = ExperimentLogger()
-#     logger.log_result(
-#         model_name="XGBoost-Tuned",
-#         embedding=predictor.embedding_name,
-#         classifier="XGBoost",
-#         dataset=split,
-#         metrics=metrics,
-#         notes=notes
-#     )
-    
-#     click.echo(f"\n=== Evaluation on {split} split ===")
-#     click.echo(f"F1 (macro): {metrics['f1_macro']:.4f}")
-#     click.echo(f"Hamming Loss: {metrics['hamming_loss']:.4f}")
-
-
-# @cli.command()
-# @click.argument("data_root", type=click.Path(exists=True))
-# @click.option("--model-path", default="models/xgb_tuned_model.pkl")
-# @click.option("--split", default="test", type=click.Choice(["train", "val", "test"]))
-# @click.option("--threshold", default=0.5)
-# def predict(data_root, model_path, split, threshold):
-#     """Predict tags for all samples in a given dataset split."""
-#     predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
-#     predictor.load(model_path)
-#     df = load_dataset_split(os.path.join(data_root, split))
-#     texts = (df["description"].fillna("") + "\n\n" + df.get("code", "").fillna("")).tolist()
-#     preds = predictor.predict(texts, threshold=threshold)
-#     click.echo(f"=== Predictions for {split} split ===")
-#     for i, tags in enumerate(preds):
-#         click.echo(f"{i}: {tags}")
-
-
-# # ----------------------- PREDICT ONE -------------------------
-# @cli.command()
-# @click.argument("text", type=str)
-# @click.option("--model-path", default="models/xgb_tuned_model.pkl")
-# @click.option("--threshold", default=0.5)
-# def predict_one(text, model_path, threshold):
-#     """Predict tags for a single text."""
-#     predictor = BaselineTagPredictor(vectorizer_type=vectorizer, use_code=use_code)
-#     predictor.load(model_path)
-#     tags = predictor.predict([text], threshold=threshold)[0]
-#     click.echo(f"Predicted tags: {tags}")
-
 
 if __name__ == "__main__":
     cli()
