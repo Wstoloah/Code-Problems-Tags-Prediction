@@ -413,7 +413,7 @@ CLASSIFIERS = {
     "xgboost": lambda: OneVsRestClassifier(
         XGBClassifier(
             n_estimators=200, max_depth=6,
-            use_label_encoder=False, eval_metric="logloss"
+            eval_metric="logloss"
         ),
         n_jobs=-1
     ),
@@ -548,8 +548,8 @@ def evaluate(data_root, model_path, split, threshold, log_path, notes):
     logger.log_result(
         model_name="BaselineTagPredictor",
         embedding=embedding_name,
-        use_code=int(predictor.use_code),
-        use_stats_features=int(predictor.use_stats_features),
+        use_code=predictor.use_code,
+        use_stats_features=predictor.use_stats_features,
         classifier=classifier_name,
         dataset=split,
         metrics=metrics,
