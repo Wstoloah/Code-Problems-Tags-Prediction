@@ -11,8 +11,5 @@ data/*
 # Virtual env
 venv
 
-# Ignore results
-results/*
-
 # Ignore executable package 
 *.egg-info
