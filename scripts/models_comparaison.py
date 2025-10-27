@@ -609,18 +609,7 @@ def main(data_dir: Path, output_dir: Path, top_n: int):
         plot_support_vs_performance(per_tag_df, output_dir)
     except Exception as e:
         click.echo(click.style(f"XXX Error creating support vs performance plot: {e}", fg='red'), err=True)
-    
-    # Generate summary report
-    click.echo("\n===> Generating summary report...\n")
-    try:
-        generate_summary_report(global_df, per_tag_df, output_dir)
-    except Exception as e:
-        click.echo(click.style(f"XXX Error creating summary report: {e}", fg='red'), err=True)
-    
-    # Print summary
-    click.echo("\n" + "="*60)
-    click.echo("SUMMARY")
-    click.echo("="*60)
+
     
     best_model = global_df.loc[global_df["F1"].idxmax()]
     click.echo(f"\n=== Best Model: {best_model['ID']} ===")
