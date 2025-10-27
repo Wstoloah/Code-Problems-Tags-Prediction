@@ -66,7 +66,8 @@ class ExperimentLogger:
             log_path: Path to the markdown log file
         """
         self.log_path = Path(log_path)
-        self.csv_dir = self.log_path.parent
+        self.csv_dir = self.log_path.parent / "outputs" / "metrics"
+        self.csv_dir.mkdir(parents=True, exist_ok=True)
         self._id_lock = Lock()  # Thread safety for ID generation
         
         try:
