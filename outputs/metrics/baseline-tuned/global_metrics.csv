@@ -19,5 +19,5 @@ Date,Model,ID,Embedding,Use code,Use stats features,Classifier,Dataset,Precision
 2025-10-28 00:05:00,BaselineTagPredictor,BaselineTagPredictor-018,TFIDF,True,False,XGBClassifier,val,0.6593,0.483,0.5484,0.0703,
 2025-10-28 00:05:00,BaselineTagPredictor,BaselineTagPredictor-019,TFIDF,True,False,MultinomialNB,val,0.0625,0.0008,0.0017,0.0924,
 2025-10-28 00:05:00,BaselineTagPredictor,BaselineTagPredictor-020,TFIDF,True,False,MLPClassifier,val,0.5671,0.2789,0.3649,0.0731,
-2025-10-28 00:35:00,TunedBaselineTagPredictor,BaselineTagPredictor-001,COUNT,True,False,TunedXGBClassifier,test,0.7433,0.4882,0.5831,0.0664,
-2025-10-28 00:36:00,TunedBaselineTagPredictor,BaselineTagPredictor-002,TFIDF,True,False,TunedXGBClassifier,test,0.7361,0.4313,0.5318,0.0706,
+2025-10-28 00:35:00,TunedBaselineTagPredictor,TunedBaselineTagPredictor-001,COUNT,True,False,TunedXGBClassifier,test,0.7433,0.4882,0.5831,0.0664,
+2025-10-28 00:36:00,TunedBaselineTagPredictor,TunedBaselineTagPredictor-002,TFIDF,True,False,TunedXGBClassifier,test,0.7361,0.4313,0.5318,0.0706,
