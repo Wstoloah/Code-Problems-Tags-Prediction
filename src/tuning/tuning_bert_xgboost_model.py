@@ -11,7 +11,7 @@ from contextlib import contextmanager
 
 from src.utils.data_loader import load_all_splits, load_dataset_split
 from src.utils.logger import ExperimentLogger
-from models.bert_based_model import TagPredictor, TARGET_TAGS, MODEL_CONFIGS
+from src.models.bert_based_model import TagPredictor, TARGET_TAGS, MODEL_CONFIGS
 
 # Config
 DEFAULT_PARAM_GRID = {
