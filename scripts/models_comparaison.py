@@ -87,6 +87,13 @@ def plot_f1_vs_hamming(global_df: pd.DataFrame, output_dir: Path):
     Helps identify models with high F1 and low error rate.
     Includes a zoomed inset of the region with best performing models.
     """
+    # Filter out models with Hamming score > 0.5
+    global_df = global_df[global_df["Hamming"] <= 0.5].copy()
+    
+    if len(global_df) == 0:
+        click.echo(click.style("/!\ Skipped: F1 vs Hamming plot (no models with Hamming <= 0.5)", fg='yellow'))
+        return
+    
     fig, ax = plt.subplots(figsize=(14, 8))
     
     # Get top 5 models
@@ -114,8 +121,8 @@ def plot_f1_vs_hamming(global_df: pd.DataFrame, output_dir: Path):
         # No top models found - skip inset by setting zoom to None
         zoom_x_min = zoom_x_max = zoom_y_min = zoom_y_max = None
     
-    # Find baseline model (any model with ID ending in -001)
-    baseline_models = global_df[global_df["ID"].str.endswith("-001")]
+    # Find baseline model
+    baseline_models = global_df[global_df["ID"] == "BaselineTagPredictor-001"]
     baseline_id = baseline_models["ID"].iloc[0] if len(baseline_models) > 0 else None
     
     # Add baseline to special models if not already in top 5
@@ -132,6 +139,7 @@ def plot_f1_vs_hamming(global_df: pd.DataFrame, output_dir: Path):
     
     # Create scatter plot
     models = global_df["Model"].unique()
+    print("====> Models: {models}")
     base_colors = plt.cm.tab10(np.linspace(0, 1, len(models)))
     
     for model, color in zip(models, base_colors):
