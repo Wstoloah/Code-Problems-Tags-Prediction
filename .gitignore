@@ -6,10 +6,18 @@ __pycache__/
 models/*
 
 # Data files
-*.json
+data/train/*.json
+data/test/*.json
+data/val/*.json
+
 
 # Virtual env
 venv
 
 # Ignore executable package 
 *.egg-info
+
+# Ignore Resutls
+
+results/*
+outputs/*
