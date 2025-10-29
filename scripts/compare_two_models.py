@@ -65,14 +65,15 @@ def plot_global_comparison(model1_row: pd.Series, model2_row: pd.Series, output_
         change = ((model2_val - model1_val) / model1_val) * 100
         y_pos = max(model1_val, model2_val) + 0.02
         color = 'green' if change > 0 else 'red'
-        axes[0].text(x[i], y_pos, f'{change:+.1f}%', ha='center', fontsize=10, 
+        axes[0].text(x[i], y_pos, f'{change:+.1f}%', ha='center', fontsize=14, 
                     fontweight='bold', color=color)
     
-    axes[0].set_ylabel('Score', fontsize=12, fontweight='bold')
+    axes[0].set_ylabel('Score', fontsize=16, fontweight='bold')
     axes[0].set_title(f'Global Metrics: {labels["model1"]} vs {labels["model2"]}', fontsize=14, fontweight='bold')
     axes[0].set_xticks(x)
-    axes[0].set_xticklabels(metrics, fontsize=11)
-    axes[0].legend(fontsize=12, loc='upper left')
+    axes[0].set_xticklabels(metrics, fontsize=14)
+    axes[0].legend(fontsize=14, loc='upper left')
+    axes[0].tick_params(axis='y', labelsize=13)
     axes[0].set_ylim([0, 1.0])
     axes[0].grid(axis='y', alpha=0.3, linestyle='--')
     
@@ -88,18 +89,20 @@ def plot_global_comparison(model1_row: pd.Series, model2_row: pd.Series, output_
     change = ((model2_row['Hamming'] - model1_row['Hamming']) / model1_row['Hamming']) * 100
     y_pos = max(hamming_data) + 0.005
     color = 'green' if change < 0 else 'red'
-    axes[1].text(0.5, y_pos, f'{change:+.1f}%', ha='center', fontsize=11, 
+    axes[1].text(0.5, y_pos, f'{change:+.1f}%', ha='center', fontsize=14, 
                 fontweight='bold', color=color)
     
     # Add value labels on bars
     for bar in bars:
         height = bar.get_height()
         axes[1].text(bar.get_x() + bar.get_width()/2., height + 0.001,
-                    f'{height:.4f}', ha='center', va='bottom', fontsize=10)
+                    f'{height:.4f}', ha='center', va='bottom', fontsize=13)
     
-    axes[1].set_ylabel('Hamming Loss (lower is better)', fontsize=12, fontweight='bold')
+    axes[1].set_ylabel('Hamming Loss (lower is better)', fontsize=16, fontweight='bold')
     axes[1].set_title(f'Error Rate: {labels["model1"]} vs {labels["model2"]}', fontsize=14, fontweight='bold')
     axes[1].set_ylim([0, max(hamming_data) * 1.2])
+    axes[1].tick_params(axis='x', labelsize=14)
+    axes[1].tick_params(axis='y', labelsize=13)
     axes[1].grid(axis='y', alpha=0.3, linestyle='--')
     
     plt.tight_layout()
@@ -135,11 +138,12 @@ def plot_per_tag_comparison(model1_tags: pd.DataFrame, model2_tags: pd.DataFrame
                          edgecolor='black', linewidth=1)
     
     axes[0].set_yticks(x)
-    axes[0].set_yticklabels(tags, fontsize=11)
-    axes[0].set_xlabel('F1 Score', fontsize=12, fontweight='bold')
+    axes[0].set_yticklabels(tags, fontsize=14)
+    axes[0].set_xlabel('F1 Score', fontsize=16, fontweight='bold')
     axes[0].set_title(f'Per-Tag F1 Scores: {labels["model1"]} vs {labels["model2"]}', fontsize=14, fontweight='bold')
-    axes[0].legend(fontsize=12, loc='lower right')
+    axes[0].legend(fontsize=14, loc='lower right')
     axes[0].set_xlim([0, 1.0])
+    axes[0].tick_params(axis='x', labelsize=13)
     axes[0].grid(axis='x', alpha=0.3, linestyle='--')
     
     # Add change annotations
@@ -148,7 +152,7 @@ def plot_per_tag_comparison(model1_tags: pd.DataFrame, model2_tags: pd.DataFrame
             x_pos = max(row.F1_model1, row.F1_model2) + 0.03
             color = 'green' if row.F1_change > 0 else 'red'
             axes[0].text(x_pos, i, f'{row.F1_change_pct:+.1f}%', 
-                        va='center', fontsize=9, color=color, fontweight='bold')
+                        va='center', fontsize=12, color=color, fontweight='bold')
     
     # Plot 2: F1 Change waterfall
     comparison_sorted = comparison.sort_values('F1_change_pct', ascending=False)
@@ -159,8 +163,10 @@ def plot_per_tag_comparison(model1_tags: pd.DataFrame, model2_tags: pd.DataFrame
     bars = axes[1].barh(tags_sorted, changes, color=colors_change, alpha=0.7, 
                         edgecolor='black', linewidth=1)
     
-    axes[1].set_xlabel('F1 Change (%)', fontsize=12, fontweight='bold')
+    axes[1].set_xlabel('F1 Change (%)', fontsize=16, fontweight='bold')
     axes[1].set_title('F1 Score Difference by Tag', fontsize=14, fontweight='bold')
+    axes[1].set_yticklabels(tags_sorted, fontsize=14)
+    axes[1].tick_params(axis='x', labelsize=13)
     axes[1].axvline(0, color='black', linewidth=1.5, linestyle='-')
     axes[1].grid(axis='x', alpha=0.3, linestyle='--')
     
@@ -169,7 +175,7 @@ def plot_per_tag_comparison(model1_tags: pd.DataFrame, model2_tags: pd.DataFrame
         x_pos = change + (1 if change > 0 else -1)
         ha = 'left' if change > 0 else 'right'
         axes[1].text(x_pos, i, f'{change:+.1f}%', va='center', ha=ha, 
-                    fontsize=10, fontweight='bold')
+                    fontsize=13, fontweight='bold')
     
     plt.tight_layout()
     plt.savefig(output_dir / "02_per_tag_f1_comparison.png", dpi=300, bbox_inches='tight')
@@ -189,27 +195,28 @@ def plot_precision_recall_comparison(model1_tags: pd.DataFrame, model2_tags: pd.
     
     # Plot 1: Precision-Recall scatter - Model 1
     axes[0].scatter(comparison['Recall_model1'], comparison['Precision_model1'],
-                   s=200, alpha=0.6, color='#3498db', edgecolors='black', linewidth=1.5,
+                   s=250, alpha=0.6, color='#3498db', edgecolors='black', linewidth=1.5,
                    label=f"{labels['model1']}: {model1_tags['ID'].iloc[0]}", marker='o')
     
     # Add labels
     for _, row in comparison.iterrows():
         axes[0].annotate(row['Tag'], 
                         xy=(row['Recall_model1'], row['Precision_model1']),
-                        xytext=(5, 5), textcoords='offset points', fontsize=9, alpha=0.7)
+                        xytext=(5, 5), textcoords='offset points', fontsize=14, alpha=0.9, fontweight='bold')
     
     axes[0].plot([0, 1], [0, 1], 'k--', alpha=0.3, linewidth=1, label='Balance line')
-    axes[0].set_xlabel('Recall', fontsize=12, fontweight='bold')
-    axes[0].set_ylabel('Precision', fontsize=12, fontweight='bold')
+    axes[0].set_xlabel('Recall', fontsize=16, fontweight='bold')
+    axes[0].set_ylabel('Precision', fontsize=16, fontweight='bold')
     axes[0].set_title(f'{labels["model1"]}: Precision vs Recall', fontsize=13, fontweight='bold')
     axes[0].set_xlim([0, 1.0])
     axes[0].set_ylim([0, 1.0])
-    axes[0].legend(fontsize=11)
+    axes[0].legend(fontsize=13)
+    axes[0].tick_params(axis='both', labelsize=12)
     axes[0].grid(True, alpha=0.3, linestyle='--')
     
     # Plot 2: Precision-Recall scatter - Model 2 (with arrows showing movement)
     axes[1].scatter(comparison['Recall_model2'], comparison['Precision_model2'],
-                   s=200, alpha=0.6, color='#e74c3c', edgecolors='black', linewidth=1.5,
+                   s=250, alpha=0.6, color='#e74c3c', edgecolors='black', linewidth=1.5,
                    label=f"{labels['model2']}: {model2_tags['ID'].iloc[0]}", marker='s', zorder=5)
     
     # Add arrows from model1 to model2
@@ -217,12 +224,12 @@ def plot_precision_recall_comparison(model1_tags: pd.DataFrame, model2_tags: pd.
         axes[1].annotate('',
                         xy=(row['Recall_model2'], row['Precision_model2']),
                         xytext=(row['Recall_model1'], row['Precision_model1']),
-                        arrowprops=dict(arrowstyle='->', lw=1.5, color='gray', alpha=0.5))
+                        arrowprops=dict(arrowstyle='->', lw=2, color='gray', alpha=0.6))
         
         # Add label at model2 position
         axes[1].annotate(row['Tag'],
                         xy=(row['Recall_model2'], row['Precision_model2']),
-                        xytext=(5, 5), textcoords='offset points', fontsize=9, alpha=0.7)
+                        xytext=(5, 5), textcoords='offset points', fontsize=14, alpha=0.9, fontweight='bold')
     
     # Add model1 points for reference
     axes[1].scatter(comparison['Recall_model1'], comparison['Precision_model1'],
@@ -230,12 +237,13 @@ def plot_precision_recall_comparison(model1_tags: pd.DataFrame, model2_tags: pd.
                    label=f"{labels['model1']}: {model1_tags['ID'].iloc[0]}", marker='o', zorder=3)
     
     axes[1].plot([0, 1], [0, 1], 'k--', alpha=0.3, linewidth=1, label='Balance line')
-    axes[1].set_xlabel('Recall', fontsize=12, fontweight='bold')
-    axes[1].set_ylabel('Precision', fontsize=12, fontweight='bold')
+    axes[1].set_xlabel('Recall', fontsize=16, fontweight='bold')
+    axes[1].set_ylabel('Precision', fontsize=16, fontweight='bold')
     axes[1].set_title('Model Comparison: Precision-Recall Movement', fontsize=13, fontweight='bold')
     axes[1].set_xlim([0, 1.0])
     axes[1].set_ylim([0, 1.0])
-    axes[1].legend(fontsize=11)
+    axes[1].legend(fontsize=13)
+    axes[1].tick_params(axis='both', labelsize=12)
     axes[1].grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
@@ -269,16 +277,17 @@ def plot_prediction_behavior(model1_tags: pd.DataFrame, model2_tags: pd.DataFram
                           edgecolor='black', linewidth=1)
     
     axes[0, 0].set_xticks(x)
-    axes[0, 0].set_xticklabels(tags, rotation=45, ha='right', fontsize=10)
-    axes[0, 0].set_ylabel('Number of Predictions', fontsize=11, fontweight='bold')
+    axes[0, 0].set_xticklabels(tags, rotation=45, ha='right', fontsize=13)
+    axes[0, 0].set_ylabel('Number of Predictions', fontsize=16, fontweight='bold')
     axes[0, 0].set_title(f'Prediction Volume: {labels["model1"]} vs {labels["model2"]}', fontsize=13, fontweight='bold')
-    axes[0, 0].legend(fontsize=11)
+    axes[0, 0].legend(fontsize=13)
+    axes[0, 0].tick_params(axis='y', labelsize=12)
     axes[0, 0].grid(axis='y', alpha=0.3, linestyle='--')
     
     # Add support reference line
     axes[0, 0].plot(x, comparison['Support_model1'], 'go--', linewidth=2, 
                    markersize=6, label='Actual Support', alpha=0.7)
-    axes[0, 0].legend(fontsize=11)
+    axes[0, 0].legend(fontsize=13)
     
     # Plot 2: Prediction change percentage
     comparison_sorted = comparison.sort_values('Predicted_change_pct', ascending=False)
@@ -289,8 +298,10 @@ def plot_prediction_behavior(model1_tags: pd.DataFrame, model2_tags: pd.DataFram
     bars = axes[0, 1].barh(tags_sorted, changes, color=colors, alpha=0.7,
                           edgecolor='black', linewidth=1)
     
-    axes[0, 1].set_xlabel('Change in Predictions (%)', fontsize=11, fontweight='bold')
+    axes[0, 1].set_xlabel('Change in Predictions (%)', fontsize=16, fontweight='bold')
     axes[0, 1].set_title('Prediction Volume Change', fontsize=13, fontweight='bold')
+    axes[0, 1].set_yticklabels(tags_sorted, fontsize=13)
+    axes[0, 1].tick_params(axis='x', labelsize=12)
     axes[0, 1].axvline(0, color='black', linewidth=1.5)
     axes[0, 1].grid(axis='x', alpha=0.3, linestyle='--')
     
@@ -299,42 +310,44 @@ def plot_prediction_behavior(model1_tags: pd.DataFrame, model2_tags: pd.DataFram
         x_pos = change + (2 if change > 0 else -2)
         ha = 'left' if change > 0 else 'right'
         axes[0, 1].text(x_pos, i, f'{change:+.1f}%', va='center', ha=ha,
-                       fontsize=9, fontweight='bold')
+                       fontsize=14, fontweight='bold')
     
     # Plot 3: Precision change vs Prediction change
     axes[1, 0].scatter(comparison['Predicted_change_pct'], 
                       (comparison['Precision_model2'] - comparison['Precision_model1']) * 100,
-                      s=200, alpha=0.6, color='purple', edgecolors='black', linewidth=1.5)
+                      s=250, alpha=0.6, color='purple', edgecolors='black', linewidth=1.5)
     
     for _, row in comparison.iterrows():
         axes[1, 0].annotate(row['Tag'],
                            xy=(row['Predicted_change_pct'], 
                                (row['Precision_model2'] - row['Precision_model1']) * 100),
-                           xytext=(5, 5), textcoords='offset points', fontsize=9, alpha=0.7)
+                           xytext=(5, 5), textcoords='offset points', fontsize=14, alpha=0.9, fontweight='bold')
     
     axes[1, 0].axhline(0, color='black', linewidth=1, linestyle='--', alpha=0.5)
     axes[1, 0].axvline(0, color='black', linewidth=1, linestyle='--', alpha=0.5)
-    axes[1, 0].set_xlabel('Prediction Count Change (%)', fontsize=11, fontweight='bold')
-    axes[1, 0].set_ylabel('Precision Change (%)', fontsize=11, fontweight='bold')
+    axes[1, 0].set_xlabel('Prediction Count Change (%)', fontsize=16, fontweight='bold')
+    axes[1, 0].set_ylabel('Precision Change (%)', fontsize=16, fontweight='bold')
     axes[1, 0].set_title('Selectivity vs Precision', fontsize=13, fontweight='bold')
+    axes[1, 0].tick_params(axis='both', labelsize=12)
     axes[1, 0].grid(True, alpha=0.3, linestyle='--')
     
     # Plot 4: Recall change vs Prediction change
     axes[1, 1].scatter(comparison['Predicted_change_pct'],
                       (comparison['Recall_model2'] - comparison['Recall_model1']) * 100,
-                      s=200, alpha=0.6, color='orange', edgecolors='black', linewidth=1.5)
+                      s=250, alpha=0.6, color='orange', edgecolors='black', linewidth=1.5)
     
     for _, row in comparison.iterrows():
         axes[1, 1].annotate(row['Tag'],
                            xy=(row['Predicted_change_pct'],
                                (row['Recall_model2'] - row['Recall_model1']) * 100),
-                           xytext=(5, 5), textcoords='offset points', fontsize=9, alpha=0.7)
+                           xytext=(5, 5), textcoords='offset points', fontsize=14, alpha=0.9, fontweight='bold')
     
     axes[1, 1].axhline(0, color='black', linewidth=1, linestyle='--', alpha=0.5)
     axes[1, 1].axvline(0, color='black', linewidth=1, linestyle='--', alpha=0.5)
-    axes[1, 1].set_xlabel('Prediction Count Change (%)', fontsize=11, fontweight='bold')
-    axes[1, 1].set_ylabel('Recall Change (%)', fontsize=11, fontweight='bold')
+    axes[1, 1].set_xlabel('Prediction Count Change (%)', fontsize=16, fontweight='bold')
+    axes[1, 1].set_ylabel('Recall Change (%)', fontsize=16, fontweight='bold')
     axes[1, 1].set_title('Selectivity vs Recall', fontsize=13, fontweight='bold')
+    axes[1, 1].tick_params(axis='both', labelsize=12)
     axes[1, 1].grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
@@ -397,7 +410,7 @@ def generate_summary_table(model1_row: pd.Series, model2_row: pd.Series,
                     colWidths=[0.25, 0.15, 0.15, 0.15, 0.2])
     
     table.auto_set_font_size(False)
-    table.set_fontsize(10)
+    table.set_fontsize(13)
     table.scale(1, 2)
     
     # Style header rows
