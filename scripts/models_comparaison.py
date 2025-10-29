@@ -71,7 +71,7 @@ def plot_global_metrics_comparison(global_df: pd.DataFrame, output_dir: Path, to
     ax.set_title(f"Top {top_n} Models: Global Metrics Comparison", fontsize=14, fontweight='bold')
     ax.set_xticks(x)
     ax.set_xticklabels(top_models["ID"], rotation=45, ha='right')
-    ax.legend(fontsize=10)
+    ax.legend(fontsize=12)
     ax.grid(axis='y', alpha=0.3, linestyle='--')
     ax.set_ylim([0, 1.0])
     
@@ -178,7 +178,7 @@ def plot_f1_vs_hamming(global_df: pd.DataFrame, output_dir: Path):
     
     # Create legend
     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left', 
-             fontsize=9, title='Models', title_fontsize=10)
+             fontsize=11, title='Models', title_fontsize=12)
     
     ax.grid(True, alpha=0.3, linestyle='--')
     
@@ -279,7 +279,7 @@ def plot_precision_recall_tradeoff(global_df: pd.DataFrame, output_dir: Path):
     ax.set_title("Precision-Recall Tradeoff", fontsize=14, fontweight='bold')
     ax.set_xlim([0, 1.0])
     ax.set_ylim([0, 1.0])
-    ax.legend(fontsize=10)
+    ax.legend(fontsize=12)
     ax.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
@@ -350,7 +350,7 @@ def plot_tag_difficulty(per_tag_df: pd.DataFrame, output_dir: Path):
     ax.set_title("Tag Difficulty Analysis: F1 Score Distribution Across All Models", 
                 fontsize=14, fontweight='bold')
     ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-    ax.legend(fontsize=10)
+    ax.legend(fontsize=12)
     ax.grid(axis='y', alpha=0.3, linestyle='--')
     
     plt.tight_layout()
@@ -394,10 +394,10 @@ def plot_model_consistency(per_tag_df: pd.DataFrame, global_df: pd.DataFrame,
     ax.axvline(mean_std, color='gray', linestyle='--', alpha=0.5, linewidth=1)
     ax.axhline(mean_f1, color='gray', linestyle='--', alpha=0.5, linewidth=1)
     
-    # Add ideal region annotation
-    ax.text(0.02, 0.98, 'Ideal:\nHigh Mean, Low Std', 
-           transform=ax.transAxes, fontsize=10, verticalalignment='top',
-           bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
+    # # Add ideal region annotation
+    # ax.text(0.02, 0.98, 'Ideal:\nHigh Mean, Low Std', 
+    #        transform=ax.transAxes, fontsize=10, verticalalignment='top',
+    #        bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.5))
     
     ax.set_xlabel("Standard Deviation (consistency)", fontsize=12, fontweight='bold')
     ax.set_ylabel("Mean F1 Score (performance)", fontsize=12, fontweight='bold')
@@ -518,7 +518,7 @@ def plot_support_vs_performance(per_tag_df: pd.DataFrame, output_dir: Path):
     ax.set_ylabel("Average F1 Score", fontsize=12, fontweight='bold')
     ax.set_title("Tag Support vs Performance: Does More Data Help?", 
                 fontsize=14, fontweight='bold')
-    ax.legend(fontsize=10)
+    ax.legend(fontsize=12)
     ax.grid(True, alpha=0.3, linestyle='--')
     
     plt.tight_layout()
